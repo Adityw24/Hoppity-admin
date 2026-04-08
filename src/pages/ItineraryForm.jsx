@@ -11,11 +11,12 @@ const TABS = ['Basics', 'Content', 'Media', 'Itinerary']
 const CATEGORIES = ['Cultural', 'Wildlife', 'Adventure', 'Trekking', 'Heritage', 'Spiritual', 'Culinary']
 const DIFFICULTIES = ['Easy', 'Moderate', 'Challenging']
 const STATES = [
-  'Andhra Pradesh','Arunachal Pradesh','Assam','Bihar','Chhattisgarh','Goa','Gujarat',
+  'Andaman & Nicobar Islands','Andhra Pradesh','Arunachal Pradesh','Assam',
+  'Bihar','Chandigarh','Chhattisgarh','Daman & Diu','Delhi','Goa','Gujarat',
   'Haryana','Himachal Pradesh','Jammu & Kashmir','Jharkhand','Karnataka','Kerala',
-  'Madhya Pradesh','Maharashtra','Manipur','Meghalaya','Mizoram','Nagaland','Odisha',
-  'Punjab','Rajasthan','Sikkim','Tamil Nadu','Telangana','Tripura','Uttar Pradesh',
-  'Uttarakhand','West Bengal','Delhi','Ladakh',
+  'Ladakh','Lakshadweep','Madhya Pradesh','Maharashtra','Manipur','Meghalaya',
+  'Mizoram','Nagaland','Odisha','Puducherry','Punjab','Rajasthan','Sikkim',
+  'Tamil Nadu','Telangana','Tripura','Uttar Pradesh','Uttarakhand','West Bengal',
 ]
 
 function slugify(str) {
