@@ -7,39 +7,23 @@ import ArrayField from '../components/ArrayField'
 import DayBuilder from '../components/DayBuilder'
 import MediaUpload from '../components/MediaUpload'
 
-const TABS = ['Basics', 'Content', 'Media', 'Itinerary']
+const TABS = ['Basics', 'Content', 'Media', 'Itinerary', 'Vendor']
 const CATEGORIES = ['Cultural', 'Wildlife', 'Adventure', 'Trekking', 'Heritage', 'Spiritual', 'Culinary']
 const DIFFICULTIES = ['Easy', 'Moderate', 'Challenging']
 const STATES = [
-  'Andaman & Nicobar Islands','Andhra Pradesh','Arunachal Pradesh','Assam',
-  'Bihar','Chandigarh','Chhattisgarh','Daman & Diu','Delhi','Goa','Gujarat',
-  'Haryana','Himachal Pradesh','Jammu & Kashmir','Jharkhand','Karnataka','Kerala',
-  'Ladakh','Lakshadweep','Madhya Pradesh','Maharashtra','Manipur','Meghalaya',
-  'Mizoram','Nagaland','Odisha','Puducherry','Punjab','Rajasthan','Sikkim',
-  'Tamil Nadu','Telangana','Tripura','Uttar Pradesh','Uttarakhand','West Bengal',
+  // ── States ──────────────────────────────────────────────────────────
+  'Andhra Pradesh','Arunachal Pradesh','Assam','Bihar','Chhattisgarh','Goa','Gujarat',
+  'Haryana','Himachal Pradesh','Jharkhand','Karnataka','Kerala',
+  'Madhya Pradesh','Maharashtra','Manipur','Meghalaya','Mizoram','Nagaland','Odisha',
+  'Punjab','Rajasthan','Sikkim','Tamil Nadu','Telangana','Tripura','Uttar Pradesh',
+  'Uttarakhand','West Bengal',
+  // ── Union Territories ────────────────────────────────────────────────
+  'Andaman & Nicobar Islands','Chandigarh','Dadra & Nagar Haveli and Daman & Diu',
+  'Delhi','Jammu & Kashmir','Ladakh','Lakshadweep','Puducherry',
 ]
 
 function slugify(str) {
   return str.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
-}
-
-function Label({ children, required }) {
-  return (
-    <label style={{ display: 'block', fontSize: 12, fontWeight: 500, color: 'var(--text-muted)', marginBottom: 6 }}>
-      {children}{required && <span style={{ color: 'var(--red)', marginLeft: 3 }}>*</span>}
-    </label>
-  )
-}
-
-function Field({ label, required, children, hint, error }) {
-  return (
-    <div>
-      {label && <Label required={required}>{label}</Label>}
-      {children}
-      {error && <p style={{ marginTop: 4, fontSize: 11, color: 'var(--red)' }}>{error}</p>}
-      {!error && hint && <p style={{ marginTop: 5, fontSize: 11, color: 'var(--text-dim)' }}>{hint}</p>}
-    </div>
-  )
 }
 
 const EMPTY = {
@@ -49,6 +33,8 @@ const EMPTY = {
   max_group_size: 12, min_group_size: 1, is_active: false,
   highlights: [], inclusions: [], exclusions: [], tips: [], city_stops: [],
   cover_image_url: '', images: [], video_url: '', itinerary_days: [],
+  vendor_name: '', vendor_contact: '', vendor_notes: '', guide_id: '',
+  search_tags: [],
 }
 
 export default function ItineraryForm() {
@@ -63,7 +49,6 @@ export default function ItineraryForm() {
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState(null) // { type: 'success'|'error', msg }
   const [slugManual, setSlugManual] = useState(false)
-  const [errors, setErrors] = useState({})
 
   useEffect(() => {
     if (!isEdit) return
@@ -88,10 +73,7 @@ export default function ItineraryForm() {
       })
   }, [id, isEdit])
 
-  const set = (field, val) => {
-    setForm(f => ({ ...f, [field]: val }))
-    if (errors[field]) setErrors(e => { const n = { ...e }; delete n[field]; return n })
-  }
+  const set = (field, val) => setForm(f => ({ ...f, [field]: val }))
 
   const handleTitleChange = (val) => {
     set('title', val)
@@ -103,41 +85,10 @@ export default function ItineraryForm() {
     setTimeout(() => setToast(null), 4000)
   }
 
-  const validate = () => {
-    const e = {}
-    if (!form.title.trim()) e.title = 'Title is required'
-    if (!form.slug.trim()) e.slug = 'Slug is required'
-    else if (!/^[a-z0-9-]+$/.test(form.slug)) e.slug = 'Only lowercase letters, numbers and hyphens'
-    if (!form.location.trim()) e.location = 'Location is required'
-    if (!form.state) e.state = 'State is required'
-    if (!form.duration.trim()) e.duration = 'Duration is required'
-    if (!form.price.trim()) e.price = 'Price display text is required'
-    const min = parseInt(form.min_group_size)
-    const max = parseInt(form.max_group_size)
-    if (!min || min < 1) e.min_group_size = 'Must be at least 1'
-    if (!max || max < 1) e.max_group_size = 'Must be at least 1'
-    else if (min && min > max) e.max_group_size = 'Must be ≥ min group size'
-    if (form.price_per_person && parseFloat(form.price_per_person) <= 0) e.price_per_person = 'Must be a positive number'
-    if (!form.blurb.trim()) e.blurb = 'Blurb is required'
-    form.itinerary_days.forEach((day, i) => {
-      if (!day.title.trim()) e[`day_${i}_title`] = `Day ${i + 1} title is required`
-    })
-    return e
-  }
-
   const handleSave = async (e) => {
     e.preventDefault()
-    const errs = validate()
-    if (Object.keys(errs).length > 0) {
-      setErrors(errs)
-      const basicsFields = ['title', 'slug', 'location', 'state', 'duration', 'price', 'min_group_size', 'max_group_size', 'price_per_person']
-      if (basicsFields.some(f => errs[f])) setTab('Basics')
-      else if (errs.blurb) setTab('Content')
-      else if (Object.keys(errs).some(k => k.startsWith('day_'))) setTab('Itinerary')
-      showToast('error', 'Please fix the highlighted errors')
-      return
-    }
-    setErrors({})
+    if (!form.title.trim()) { showToast('error', 'Title is required'); setTab('Basics'); return }
+    if (!form.slug.trim()) { showToast('error', 'Slug is required'); setTab('Basics'); return }
 
     setSaving(true)
     try {
@@ -146,14 +97,23 @@ export default function ItineraryForm() {
         price_per_person: form.price_per_person ? parseFloat(form.price_per_person) : null,
         max_group_size: parseInt(form.max_group_size) || 12,
         min_group_size: parseInt(form.min_group_size) || 1,
-        // Ensure cover_image_url is first image if not set
         cover_image_url: form.cover_image_url || form.images[0] || null,
+        // UUID FK — must be null not empty string
+        guide_id: form.guide_id?.trim() || null,
+        // Vendor strings — null if blank
+        vendor_name:    form.vendor_name?.trim()    || null,
+        vendor_contact: form.vendor_contact?.trim() || null,
+        vendor_notes:   form.vendor_notes?.trim()   || null,
       }
-      // Remove internal-only fields
+      // Strip read-only / generated / trigger-managed fields
+      // search_vector is a tsvector managed by trig_update_search_vector — never send manually
+      // updated_at is managed by DB — sending it causes type cast errors
       delete payload.id
       delete payload.rating
       delete payload.review_count
       delete payload.created_at
+      delete payload.search_vector
+      delete payload.updated_at
 
       let savedId = id
       if (isEdit) {
@@ -175,7 +135,13 @@ export default function ItineraryForm() {
         changes: payload,
       }).catch(() => {})
 
-      showToast('success', isEdit ? 'Changes saved.' : 'Itinerary created.')
+      const activeStatus = payload.is_active
+      showToast(
+        'success',
+        isEdit
+          ? activeStatus ? 'Changes saved — tour is live.' : 'Changes saved — tour is still in Draft (not visible on site).'
+          : activeStatus ? 'Itinerary created and live on the website.' : 'Itinerary created as Draft — toggle to Live to publish it.'
+      )
       if (!isEdit) setTimeout(() => navigate(`/itineraries/${savedId}/edit`), 1200)
     } catch (err) {
       showToast('error', err.message)
@@ -184,7 +150,19 @@ export default function ItineraryForm() {
     }
   }
 
+  const Label = ({ children, required }) => (
+    <label style={{ display: 'block', fontSize: 12, fontWeight: 500, color: 'var(--text-muted)', marginBottom: 6 }}>
+      {children}{required && <span style={{ color: 'var(--red)', marginLeft: 3 }}>*</span>}
+    </label>
+  )
 
+  const Field = ({ label, required, children, hint }) => (
+    <div>
+      {label && <Label required={required}>{label}</Label>}
+      {children}
+      {hint && <p style={{ marginTop: 5, fontSize: 11, color: 'var(--text-dim)' }}>{hint}</p>}
+    </div>
+  )
 
   if (loading) {
     return (
@@ -227,9 +205,16 @@ export default function ItineraryForm() {
         </button>
 
         <div style={{ flex: 1 }}>
-          <h1 style={{ fontSize: 16, fontWeight: 600 }}>
-            {isEdit ? `Editing: ${form.title || 'Untitled'}` : 'New Itinerary'}
-          </h1>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <h1 style={{ fontSize: 16, fontWeight: 600 }}>
+              {isEdit ? `Editing: ${form.title || 'Untitled'}` : 'New Itinerary'}
+            </h1>
+            {isEdit && id && (
+              <span className="mono badge badge-purple" style={{ fontSize: 11 }}>
+                HOP-{String(id).padStart(4,'0')}
+              </span>
+            )}
+          </div>
           {form.slug && (
             <p className="mono" style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
               /{form.slug}
@@ -237,25 +222,34 @@ export default function ItineraryForm() {
           )}
         </div>
 
-        {/* Active toggle */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-            {form.is_active ? 'Active' : 'Draft'}
-          </span>
+        {/* Active toggle — prominent publish button */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <button
             type="button"
             onClick={() => set('is_active', !form.is_active)}
             style={{
-              width: 40, height: 22, borderRadius: 11, border: 'none', cursor: 'pointer',
-              background: form.is_active ? 'var(--green)' : 'var(--surface-2)',
-              position: 'relative', transition: 'background 0.2s',
+              display: 'flex', alignItems: 'center', gap: 8,
+              padding: '6px 14px',
+              background: form.is_active
+                ? 'rgba(16,185,129,0.12)'
+                : 'rgba(245,158,11,0.12)',
+              border: `1.5px solid ${form.is_active ? 'rgba(16,185,129,0.4)' : 'rgba(245,158,11,0.4)'}`,
+              borderRadius: 8, cursor: 'pointer', transition: 'all 0.15s',
             }}
           >
+            {/* Traffic light dot */}
             <span style={{
-              position: 'absolute', top: 3, left: form.is_active ? 20 : 3,
-              width: 16, height: 16, borderRadius: '50%', background: 'white',
-              transition: 'left 0.2s',
+              width: 8, height: 8, borderRadius: '50%',
+              background: form.is_active ? 'var(--green)' : '#f59e0b',
+              flexShrink: 0,
             }} />
+            <span style={{
+              fontSize: 12, fontWeight: 700,
+              color: form.is_active ? 'var(--green)' : '#92400e',
+              fontFamily: 'DM Mono',
+            }}>
+              {form.is_active ? 'LIVE' : 'DRAFT — click to publish'}
+            </span>
           </button>
         </div>
 
@@ -266,53 +260,81 @@ export default function ItineraryForm() {
 
       {/* Tab bar */}
       <div style={{ display: 'flex', padding: '0 32px', borderBottom: '1px solid var(--border)', background: 'var(--surface)' }}>
-        {TABS.map(t => {
-          const tabHasError =
-            (t === 'Basics' && ['title','slug','location','state','duration','price','min_group_size','max_group_size','price_per_person'].some(f => errors[f])) ||
-            (t === 'Content' && !!errors.blurb) ||
-            (t === 'Itinerary' && Object.keys(errors).some(k => k.startsWith('day_')))
-          return (
-            <button
-              key={t} type="button"
-              onClick={() => setTab(t)}
-              style={{
-                padding: '12px 20px', background: 'none', border: 'none',
-                borderBottom: tab === t ? '2px solid var(--purple)' : '2px solid transparent',
-                fontSize: 13, fontWeight: tab === t ? 600 : 400,
-                color: tab === t ? 'var(--text)' : 'var(--text-muted)',
-                cursor: 'pointer', fontFamily: 'DM Sans, sans-serif',
-                transition: 'all 0.15s',
-                display: 'flex', alignItems: 'center', gap: 6,
-              }}
-            >
-              {t}
-              {tabHasError && <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--red)', display: 'inline-block', flexShrink: 0 }} />}
-            </button>
-          )
-        })}
+        {TABS.map(t => (
+          <button
+            key={t} type="button"
+            onClick={() => setTab(t)}
+            style={{
+              padding: '12px 20px', background: 'none', border: 'none',
+              borderBottom: tab === t ? '2px solid var(--purple)' : '2px solid transparent',
+              fontSize: 13, fontWeight: tab === t ? 600 : 400,
+              color: tab === t ? 'var(--text)' : 'var(--text-muted)',
+              cursor: 'pointer', fontFamily: 'DM Sans, sans-serif',
+              transition: 'all 0.15s',
+            }}
+          >
+            {t}
+          </button>
+        ))}
       </div>
 
       {/* Form body */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '28px 32px' }}>
         <div style={{ maxWidth: 780 }}>
 
+          {/* Draft warning banner */}
+          {!form.is_active && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 12,
+              padding: '12px 16px',
+              background: 'rgba(245,158,11,0.08)',
+              border: '1px solid rgba(245,158,11,0.3)',
+              borderRadius: 10,
+              marginBottom: 20,
+            }}>
+              <span style={{ fontSize: 18 }}>⚠️</span>
+              <div style={{ flex: 1 }}>
+                <p style={{ fontSize: 13, fontWeight: 700, color: '#92400e', marginBottom: 2 }}>
+                  This itinerary is in Draft
+                </p>
+                <p style={{ fontSize: 12, color: '#b45309' }}>
+                  It is NOT visible on the website or app. Toggle{' '}
+                  <strong>"DRAFT — click to publish"</strong>{' '}
+                  in the top bar to make it live.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => set('is_active', true)}
+                style={{
+                  padding: '7px 14px', borderRadius: 7, border: 'none',
+                  background: '#f59e0b', color: 'white',
+                  fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                  fontFamily: 'DM Sans, sans-serif', flexShrink: 0,
+                }}
+              >
+                Publish now
+              </button>
+            </div>
+          )}
+
           {/* ── BASICS ─────────────────────────────────────────── */}
           {tab === 'Basics' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-                <Field label="Title" required error={errors.title}>
+                <Field label="Title" required>
                   <input className="field" value={form.title} onChange={e => handleTitleChange(e.target.value)} placeholder="Of Rains, Rivers & Root Bridges" />
                 </Field>
-                <Field label="Slug (URL path)" required hint="Used in URL: hoppity.in/itinerary/your-slug" error={errors.slug}>
+                <Field label="Slug (URL path)" required hint="Used in URL: hoppity.in/itinerary/your-slug">
                   <input className="field mono" value={form.slug} onChange={e => { setSlugManual(true); set('slug', e.target.value) }} placeholder="rains-rivers-root-bridges" style={{ fontSize: 13 }} />
                 </Field>
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-                <Field label="Location" hint="Display text, e.g. 'Meghalaya' or 'Meghalaya • Assam'" error={errors.location}>
+                <Field label="Location" hint="Display text, e.g. 'Meghalaya' or 'Meghalaya • Assam'">
                   <input className="field" value={form.location} onChange={e => set('location', e.target.value)} placeholder="Meghalaya" />
                 </Field>
-                <Field label="State" hint="Primary state for filtering" error={errors.state}>
+                <Field label="State" hint="Primary state for filtering">
                   <select className="field" value={form.state} onChange={e => set('state', e.target.value)}>
                     <option value="">— Select state —</option>
                     {STATES.map(s => <option key={s} value={s}>{s}</option>)}
@@ -334,10 +356,13 @@ export default function ItineraryForm() {
                 <Field label="Tag / Badge" hint="e.g. Monsoon Special">
                   <input className="field" value={form.tag} onChange={e => set('tag', e.target.value)} placeholder="Signature Journey" />
                 </Field>
+                <Field label="Search Tags" hint="Keywords travellers search for — press Enter after each">
+                  <ArrayField values={form.search_tags} onChange={v => set('search_tags', v)} placeholder="monsoon, northeast india, root bridges, offbeat..." />
+                </Field>
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-                <Field label="Duration" hint="e.g. 6D / 5N" error={errors.duration}>
+                <Field label="Duration" hint="e.g. 6D / 5N">
                   <input className="field" value={form.duration} onChange={e => { set('duration', e.target.value); set('duration_display', e.target.value) }} placeholder="6D / 5N" />
                 </Field>
                 <Field label="Duration (display)" hint="Overrides above in UI">
@@ -346,19 +371,19 @@ export default function ItineraryForm() {
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-                <Field label="Price (display text)" hint="e.g. ₹18,000 or 'Price On Request'" error={errors.price}>
+                <Field label="Price (display text)" hint="e.g. ₹18,000 or 'Price On Request'">
                   <input className="field" value={form.price} onChange={e => set('price', e.target.value)} placeholder="Price On Request" />
                 </Field>
-                <Field label="Price per person (₹)" hint="Leave blank for On Request" error={errors.price_per_person}>
+                <Field label="Price per person (₹)" hint="Leave blank for On Request">
                   <input className="field" type="number" value={form.price_per_person} onChange={e => set('price_per_person', e.target.value)} placeholder="18000" min="0" />
                 </Field>
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-                <Field label="Min group size" error={errors.min_group_size}>
+                <Field label="Min group size">
                   <input className="field" type="number" value={form.min_group_size} onChange={e => set('min_group_size', e.target.value)} min="1" />
                 </Field>
-                <Field label="Max group size" error={errors.max_group_size}>
+                <Field label="Max group size">
                   <input className="field" type="number" value={form.max_group_size} onChange={e => set('max_group_size', e.target.value)} min="1" />
                 </Field>
               </div>
@@ -368,7 +393,7 @@ export default function ItineraryForm() {
           {/* ── CONTENT ────────────────────────────────────────── */}
           {tab === 'Content' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-              <Field label="Blurb" hint="1–2 sentence description shown on listing cards" error={errors.blurb}>
+              <Field label="Blurb" hint="1–2 sentence description shown on listing cards">
                 <textarea className="field" value={form.blurb} onChange={e => set('blurb', e.target.value)} rows={3} placeholder="A monsoon journey through the Khasi Hills…" />
               </Field>
 
@@ -459,6 +484,67 @@ export default function ItineraryForm() {
             </div>
           )}
 
+          {/* ── VENDOR (INTERNAL ONLY) ─────────────────────────── */}
+          {tab === 'Vendor' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+              <div style={{
+                padding: '12px 16px',
+                background: 'rgba(245,158,11,0.08)',
+                border: '1px solid rgba(245,158,11,0.25)',
+                borderRadius: 10,
+                display: 'flex', alignItems: 'flex-start', gap: 10,
+              }}>
+                <span style={{ fontSize: 16 }}>🔒</span>
+                <div>
+                  <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--amber)', marginBottom: 4 }}>Internal use only</p>
+                  <p style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                    Vendor details are never shown on the public website or app. Visible to @triffair.com admins only.
+                  </p>
+                </div>
+              </div>
+
+              <Field label="Vendor / Operator Name" hint="The ground operator or tour company running this itinerary">
+                <input className="field" value={form.vendor_name} onChange={e => set('vendor_name', e.target.value)} placeholder="e.g. Northeast Trails Pvt. Ltd." />
+              </Field>
+
+              <Field label="Vendor Contact" hint="Phone, email, or WhatsApp">
+                <input className="field" value={form.vendor_contact} onChange={e => set('vendor_contact', e.target.value)} placeholder="e.g. +91 98765 43210 · vendor@example.com" />
+              </Field>
+
+              <Field label="Internal Notes" hint="Cost price, margin, SLAs, special instructions — internal team only">
+                <textarea className="field" value={form.vendor_notes} onChange={e => set('vendor_notes', e.target.value)} rows={5}
+                  placeholder="e.g. Cost ₹12,000/pax. Margin 30%. Min 4 pax to run. Contact Rahul 48h before departure." />
+              </Field>
+
+              <Field label="Guide ID (Supabase UUID)" hint="Links to Host_details table — optional">
+                <input className="field mono" value={form.guide_id} onChange={e => set('guide_id', e.target.value)}
+                  placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" style={{ fontSize: 12 }} />
+              </Field>
+
+              {/* Unique identifiers panel */}
+              {isEdit && id && (
+                <div className="card" style={{ padding: 16 }}>
+                  <p className="section-label" style={{ marginBottom: 12 }}>Unique Identifiers</p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {[
+                      ['Hoppity ID', <span className="mono badge badge-purple" style={{ fontSize: 13 }}>HOP-{String(id).padStart(4,'0')}</span>],
+                      ['Database ID', <span className="mono" style={{ fontSize: 12 }}>{id}</span>],
+                      ['URL Slug', <span className="mono" style={{ fontSize: 12, color: 'var(--purple-light)' }}>{form.slug}</span>],
+                      ['Public URL', <a href={`https://www.hoppity.in/itinerary/${form.slug}`} target="_blank" rel="noreferrer"
+                          style={{ fontSize: 12, color: 'var(--purple-light)', fontFamily: 'DM Mono', textDecoration: 'none' }}>
+                          hoppity.in/itinerary/{form.slug} ↗</a>],
+                    ].map(([label, val]) => (
+                      <div key={label} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{label}</span>
+                        {val}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* ── ITINERARY DAYS ─────────────────────────────────── */}
           {tab === 'Itinerary' && (
             <div>
@@ -466,18 +552,7 @@ export default function ItineraryForm() {
                 Build the day-by-day itinerary. Each day has a title, description, and a list of activities.
                 Use the arrows to reorder days.
               </p>
-              <DayBuilder
-                days={form.itinerary_days}
-                onChange={v => {
-                  set('itinerary_days', v)
-                  setErrors(e => {
-                    const n = { ...e }
-                    Object.keys(n).forEach(k => { if (k.startsWith('day_')) delete n[k] })
-                    return n
-                  })
-                }}
-                errors={errors}
-              />
+              <DayBuilder days={form.itinerary_days} onChange={v => set('itinerary_days', v)} />
             </div>
           )}
 
