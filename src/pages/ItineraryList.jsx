@@ -24,13 +24,21 @@ export default function ItineraryList() {
   const [toggling, setToggling] = useState(null)
   const [showFilters, setShowFilters] = useState(false)
 
+  const [loadError, setLoadError] = useState(null)
+
   const load = useCallback(async () => {
     setLoading(true)
-    const { data } = await supabase
+    setLoadError(null)
+    const { data, error } = await supabase
       .from('Itineraries')
-      .select('id,title,slug,location,state,category,difficulty,duration,price,price_per_person,is_active,rating,review_count,cover_image_url,created_at')
+      .select('id,title,slug,location,state,category,difficulty,duration,price,price_per_person,is_active,rating,review_count,cover_image_url,created_at,inclusions,exclusions,vendor_name,guide_id')
       .order(sortCol, { ascending: sortAsc })
-    setRows(data || [])
+    if (error) {
+      setLoadError(error.message)
+      setRows([])
+    } else {
+      setRows(data || [])
+    }
     setLoading(false)
   }, [sortCol, sortAsc])
 
@@ -192,6 +200,12 @@ export default function ItineraryList() {
           <div style={{ padding: 60, textAlign: 'center' }}>
             <div className="spinner" style={{ margin: '0 auto' }} />
           </div>
+        ) : loadError ? (
+          <div style={{ padding: 60, textAlign: 'center', fontSize: 14 }}>
+            <p style={{ color: 'var(--red)', fontWeight: 600, marginBottom: 8 }}>Failed to load itineraries</p>
+            <p style={{ color: 'var(--text-muted)', fontFamily: 'DM Mono', fontSize: 12 }}>{loadError}</p>
+            <button className="btn btn-ghost btn-sm" onClick={load} style={{ marginTop: 16 }}>↻ Retry</button>
+          </div>
         ) : filtered.length === 0 ? (
           <div style={{ padding: 60, textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
             No itineraries match your filters.
@@ -208,6 +222,8 @@ export default function ItineraryList() {
                   <ThBtn col="difficulty">Difficulty</ThBtn>
                   <ThBtn col="price">Price</ThBtn>
                   <ThBtn col="rating">Rating</ThBtn>
+                  <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', fontFamily: 'DM Mono', textTransform: 'uppercase', letterSpacing: '0.08em', whiteSpace: 'nowrap' }}>Inc/Exc</th>
+                  <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', fontFamily: 'DM Mono', textTransform: 'uppercase', letterSpacing: '0.08em', whiteSpace: 'nowrap' }}>Vendor</th>
                   <ThBtn col="is_active">Status</ThBtn>
                   <th style={{ padding: '10px 16px', textAlign: 'right', fontSize: 11, fontFamily: 'DM Mono', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
                     Actions
@@ -222,7 +238,9 @@ export default function ItineraryList() {
                     onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                   >
                     <td style={{ padding: '12px 16px' }}>
-                      <span className="mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>{row.id}</span>
+                      <span className="mono" style={{ fontSize: 11, color: 'var(--purple-light)', fontWeight: 600 }}>
+                        HOP-{String(row.id).padStart(4,'0')}
+                      </span>
                     </td>
                     <td style={{ padding: '12px 16px', maxWidth: 260 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -263,10 +281,41 @@ export default function ItineraryList() {
                         : <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>—</span>
                       }
                     </td>
+                    {/* Inclusions / Exclusions count */}
                     <td style={{ padding: '12px 16px' }}>
-                      <span className={`badge ${row.is_active ? 'badge-green' : 'badge-red'}`}>
-                        {row.is_active ? 'Active' : 'Draft'}
-                      </span>
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        <span className="badge badge-green" title="Inclusions">
+                          +{row.inclusions?.length || 0}
+                        </span>
+                        <span className="badge badge-red" title="Exclusions">
+                          −{row.exclusions?.length || 0}
+                        </span>
+                      </div>
+                    </td>
+                    {/* Vendor */}
+                    <td style={{ padding: '12px 16px', maxWidth: 140 }}>
+                      {row.vendor_name
+                        ? <span style={{ fontSize: 12, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>{row.vendor_name}</span>
+                        : <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>—</span>
+                      }
+                    </td>
+                    <td style={{ padding: '12px 16px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span className={`badge ${row.is_active ? 'badge-green' : 'badge-amber'}`}>
+                          {row.is_active ? '● Live' : '○ Draft'}
+                        </span>
+                        {!row.is_active && (
+                          <button
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => toggleActive(row)}
+                            disabled={toggling === row.id}
+                            title="Publish this itinerary to the website"
+                            style={{ padding: '2px 8px', fontSize: 10, color: 'var(--green)', borderColor: 'rgba(16,185,129,0.3)' }}
+                          >
+                            {toggling === row.id ? '…' : 'Publish'}
+                          </button>
+                        )}
+                      </div>
                     </td>
                     <td style={{ padding: '12px 16px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
