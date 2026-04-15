@@ -47,7 +47,7 @@ export function AuthProvider({ children }) {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: window.location.origin,
+        redirectTo: 'https://admin.hoppity.in/dashboard'
         queryParams: {
           hd: 'triffair.com', // Hint Google to show only @triffair.com accounts
           prompt: 'select_account',
