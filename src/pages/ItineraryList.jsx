@@ -61,14 +61,16 @@ export default function ItineraryList() {
   const toggleActive = async (row) => {
     setToggling(row.id)
     await supabase.from('Itineraries').update({ is_active: !row.is_active }).eq('id', row.id)
-    await supabase.from('Admin_logs').insert({
-      admin_email: user.email,
-      action: 'toggle_active',
-      entity_type: 'itinerary',
-      entity_id: String(row.id),
-      entity_title: row.title,
-      changes: { is_active: !row.is_active },
-    }).catch(() => {})
+    try {
+      await supabase.from('Admin_logs').insert({
+        admin_email: user.email,
+        action: 'toggle_active',
+        entity_type: 'itinerary',
+        entity_id: String(row.id),
+        entity_title: row.title,
+        changes: { is_active: !row.is_active },
+      })
+    } catch (e) { /* ignore logging errors */ }
     setRows(prev => prev.map(r => r.id === row.id ? { ...r, is_active: !r.is_active } : r))
     setToggling(null)
   }
@@ -77,13 +79,15 @@ export default function ItineraryList() {
     if (!confirm(`Delete "${row.title}"? This cannot be undone.`)) return
     setDeleting(row.id)
     await supabase.from('Itineraries').delete().eq('id', row.id)
-    await supabase.from('Admin_logs').insert({
-      admin_email: user.email,
-      action: 'delete',
-      entity_type: 'itinerary',
-      entity_id: String(row.id),
-      entity_title: row.title,
-    }).catch(() => {})
+    try {
+      await supabase.from('Admin_logs').insert({
+        admin_email: user.email,
+        action: 'delete',
+        entity_type: 'itinerary',
+        entity_id: String(row.id),
+        entity_title: row.title,
+      })
+    } catch (e) { /* ignore logging errors */ }
     setRows(prev => prev.filter(r => r.id !== row.id))
     setDeleting(null)
   }

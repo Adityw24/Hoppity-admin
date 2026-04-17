@@ -5,9 +5,12 @@ export default function ArrayField({ label, values = [], onChange, placeholder }
   const [input, setInput] = useState('')
 
   const add = () => {
-    const val = input.trim()
+    const val = String(input || '').trim()
     if (!val) return
-    onChange([...values, val])
+    // Prevent duplicate entries
+    if (!values.includes(val)) {
+      onChange([...values, val])
+    }
     setInput('')
   }
 
@@ -43,12 +46,14 @@ export default function ArrayField({ label, values = [], onChange, placeholder }
       {/* Input */}
       <div style={{ display: 'flex', gap: 8 }}>
         <input
+          type="text"
           className="field"
           value={input}
-          onChange={e => setInput(e.target.value)}
+          onChange={e => setInput(e.currentTarget.value)}
           onKeyDown={handleKey}
           placeholder={placeholder || `Add ${label?.toLowerCase() || 'item'} and press Enter`}
           style={{ flex: 1 }}
+          autoComplete="off"
         />
         <button type="button" className="btn btn-ghost btn-sm" onClick={add} style={{ flexShrink: 0 }}>
           <Plus size={13} /> Add

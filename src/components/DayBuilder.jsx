@@ -42,7 +42,7 @@ export default function DayBuilder({ days = [], onChange, errors = {} }) {
               <input
                 className="field"
                 value={day.title}
-                onChange={e => updateDay(i, 'title', e.target.value)}
+                onChange={e => updateDay(i, 'title', e.currentTarget.value)}
                 placeholder="Day title (e.g. Into the Clouds)"
                 style={{ width: '100%', background: 'transparent', border: errors[`day_${i}_title`] ? '1px solid var(--red)' : 'none', padding: '0', fontSize: 14, fontWeight: 500 }}
               />
@@ -72,7 +72,7 @@ export default function DayBuilder({ days = [], onChange, errors = {} }) {
               <textarea
                 className="field"
                 value={day.description}
-                onChange={e => updateDay(i, 'description', e.target.value)}
+                onChange={e => updateDay(i, 'description', e.currentTarget.value)}
                 placeholder="Describe what happens this day…"
                 rows={3}
               />
