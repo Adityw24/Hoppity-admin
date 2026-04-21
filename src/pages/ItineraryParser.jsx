@@ -333,24 +333,30 @@ export default function ItineraryParser() {
         reader.readAsDataURL(file)
       })
 
-      // Invoke edge function via Supabase client (URL already configured)
-      const { data: fnData, error: fnError } = await supabase.functions.invoke('parse-brochure', {
-        body: { pdf_base64: base64 },
-      })
+      // Hardcoded Supabase URL — no env vars, no client internals
+      const fnResponse = await fetch(
+        'https://wenhudcyvlhilpgazylg.supabase.co/functions/v1/parse-brochure',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indlbmh1ZGN5dmxoaWxwZ2F6eWxnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk0OTY0MTgsImV4cCI6MjA4NTA3MjQxOH0.Jdx993pFvb0JC87NaYhOQ6UR_7UIJBA1mkFQUeoK7bA',
+            'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indlbmh1ZGN5dmxoaWxwZ2F6eWxnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk0OTY0MTgsImV4cCI6MjA4NTA3MjQxOH0.Jdx993pFvb0JC87NaYhOQ6UR_7UIJBA1mkFQUeoK7bA',
+          },
+          body: JSON.stringify({ pdf_base64: base64 }),
+        }
+      )
 
       clearInterval(stepInterval)
       setParseProgress(100)
       setParseStepIdx(PARSE_STEPS.length - 1)
 
-      if (fnError) {
-        // Extract actual error body from the response
-        let detail = fnError.message
-        try {
-          const errBody = await fnError.context?.json()
-          detail = errBody?.error || fnError.message
-        } catch {}
-        throw new Error(detail)
+      if (!fnResponse.ok) {
+        const errBody = await fnResponse.json().catch(() => ({}))
+        throw new Error(errBody.error || `HTTP ${fnResponse.status}`)
       }
+
+      const fnData = await fnResponse.json()
       if (fnData?.error) throw new Error(fnData.error)
 
       const parsed = fnData.result
