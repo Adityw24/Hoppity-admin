@@ -26,39 +26,6 @@ const PARSE_STEPS = [
   'Structuring final output',
 ]
 
-const SYSTEM_PROMPT = `You are an expert travel itinerary parser for Hoppity, an authentic India travel platform.
-Parse the brochure/document and return ONLY valid JSON with this exact structure — no markdown, no explanation, raw JSON only:
-{
-  "title": "Full tour title",
-  "category": "adventure|cultural|wildlife|spiritual|luxury|offbeat|pilgrimage|honeymoon|family",
-  "state": "Indian state name",
-  "location": "Specific region/area",
-  "price_per_person": 0,
-  "difficulty": "easy|moderate|difficult",
-  "duration_display": "X Days Y Nights",
-  "seo_description": "1-2 sentence SEO description of the tour",
-  "city_stops": ["City1","City2"],
-  "search_tags": ["tag1","tag2","tag3"],
-  "mood_tags": ["scenic","offbeat","adventure"],
-  "highlights": ["highlight1","highlight2"],
-  "inclusions": ["Accommodation in 3-star hotels","All meals included"],
-  "exclusions": ["Airfare","Personal expenses"],
-  "tips": ["tip1","tip2"],
-  "itinerary_days": [
-    {"title":"Day 1: Arrival in X","description":"Detailed description of the day.","activities":["Activity 1","Activity 2"]}
-  ],
-  "vendor_name": "DMC or operator name if visible",
-  "vendor_contact": "Phone or email if visible",
-  "vendor_notes": ""
-}
-Rules:
-- price_per_person must be a number (0 if not found)
-- One itinerary_days entry per described day
-- Populate all arrays as fully as possible from the brochure
-- state must be a valid Indian state
-- Infer category from context if not explicitly stated
-- Return ONLY the JSON object`
-
 // ─── Helper: confidence level ─────────────────────────────────────────────────
 
 function confLevel(val) {
@@ -284,9 +251,9 @@ function VendorTab({ form, set }) {
 export default function ItineraryParser() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const editId = searchParams.get('edit') // ?edit=42 loads existing itinerary
+  const editId = searchParams.get('edit')
 
-  const [step, setStep] = useState('upload')   // upload | parsing | edit
+  const [step, setStep] = useState('upload')
   const [form, setForm] = useState(EMPTY)
   const [tab, setTab] = useState(0)
   const [file, setFile] = useState(null)
@@ -358,6 +325,7 @@ export default function ItineraryParser() {
     }, 1200)
 
     try {
+      // Convert PDF to base64
       const base64 = await new Promise((res, rej) => {
         const reader = new FileReader()
         reader.onload = () => res(reader.result.split(',')[1])
@@ -365,33 +333,19 @@ export default function ItineraryParser() {
         reader.readAsDataURL(file)
       })
 
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 4000,
-          system: SYSTEM_PROMPT,
-          messages: [{
-            role: 'user',
-            content: [
-              { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } },
-              { type: 'text', text: 'Parse this travel brochure and return the complete JSON itinerary object.' }
-            ]
-          }]
-        })
+      // Call via Supabase Edge Function (avoids CORS)
+      const { data, error } = await supabase.functions.invoke('parse-brochure', {
+        body: { pdf_base64: base64 },
       })
 
       clearInterval(stepInterval)
       setParseProgress(100)
       setParseStepIdx(PARSE_STEPS.length - 1)
 
-      if (!response.ok) throw new Error(`API error ${response.status}`)
+      if (error) throw new Error(error.message)
+      if (data?.error) throw new Error(data.error)
 
-      const data = await response.json()
-      const text = data.content?.find(b => b.type === 'text')?.text || ''
-      const cleaned = text.replace(/```json|```/g, '').trim()
-      const parsed = JSON.parse(cleaned)
+      const parsed = data.result
 
       setTimeout(() => {
         setForm(prev => ({
@@ -424,40 +378,27 @@ export default function ItineraryParser() {
     setSaving(true)
     setAlert(null)
 
-    // Build the slug from title
     const slug = form.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 
     const payload = {
-      title: form.title,
-      slug,
-      category: form.category,
-      state: form.state,
-      location: form.location,
+      title: form.title, slug,
+      category: form.category, state: form.state, location: form.location,
       price_per_person: form.price_per_person ? Number(form.price_per_person) : null,
-      difficulty: form.difficulty,
-      duration_display: form.duration_display,
-      seo_description: form.seo_description,
-      city_stops: form.city_stops,
-      search_tags: form.search_tags,
-      mood_tags: form.mood_tags,
-      highlights: form.highlights,
-      inclusions: form.inclusions,
-      exclusions: form.exclusions,
-      tips: form.tips,
-      itinerary_days: form.itinerary_days,
-      vendor_name: form.vendor_name,
-      vendor_contact: form.vendor_contact,
-      vendor_notes: form.vendor_notes,
+      difficulty: form.difficulty, duration_display: form.duration_display,
+      seo_description: form.seo_description, city_stops: form.city_stops,
+      search_tags: form.search_tags, mood_tags: form.mood_tags,
+      highlights: form.highlights, inclusions: form.inclusions,
+      exclusions: form.exclusions, tips: form.tips,
+      itinerary_days: form.itinerary_days, vendor_name: form.vendor_name,
+      vendor_contact: form.vendor_contact, vendor_notes: form.vendor_notes,
       is_active: form.is_active,
     }
 
     let error
     if (editId) {
-      // Update existing
       const res = await supabase.from('Itineraries').update(payload).eq('id', editId)
       error = res.error
     } else {
-      // Insert new
       const res = await supabase.from('Itineraries').insert([payload])
       error = res.error
     }
@@ -485,7 +426,6 @@ export default function ItineraryParser() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
 
-      {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 24px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -514,13 +454,9 @@ export default function ItineraryParser() {
         <button className="btn btn-ghost btn-sm" onClick={() => navigate('/itineraries')}>← Back</button>
       </div>
 
-      {/* Body */}
       <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', flex: 1, overflow: 'hidden' }}>
 
-        {/* Sidebar */}
         <div style={{ borderRight: '1px solid var(--border)', padding: 20, display: 'flex', flexDirection: 'column', gap: 20, overflowY: 'auto', background: 'var(--surface)' }}>
-
-          {/* Steps */}
           <div>
             <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)', marginBottom: 10 }}>Progress</div>
             {['Upload Brochure', 'AI Parsing', 'Review & Save'].map((s, i) => {
@@ -537,7 +473,6 @@ export default function ItineraryParser() {
             })}
           </div>
 
-          {/* File info */}
           {file && (
             <div>
               <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)', marginBottom: 8 }}>File</div>
@@ -548,7 +483,6 @@ export default function ItineraryParser() {
             </div>
           )}
 
-          {/* Confidence summary */}
           {step === 'edit' && (
             <div>
               <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)', marginBottom: 8 }}>Field Confidence</div>
@@ -575,7 +509,6 @@ export default function ItineraryParser() {
             </div>
           )}
 
-          {/* Active toggle */}
           {step === 'edit' && (
             <div style={{ marginTop: 'auto' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 12px' }}>
@@ -592,10 +525,7 @@ export default function ItineraryParser() {
           )}
         </div>
 
-        {/* Main content area */}
         <div style={{ overflowY: 'auto', padding: 24 }}>
-
-          {/* Alert */}
           {alert && (
             <div style={{ marginBottom: 16, borderRadius: 8, padding: '10px 14px', fontSize: 12, display: 'flex', gap: 8, alignItems: 'flex-start', background: alert.type === 'success' ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.08)', border: `1px solid ${alert.type === 'success' ? 'rgba(34,197,94,0.25)' : 'rgba(239,68,68,0.25)'}`, color: alert.type === 'success' ? '#22c55e' : '#ef4444' }}>
               <span style={{ flexShrink: 0 }}>{alert.type === 'success' ? '✓' : '!'}</span>
@@ -604,7 +534,6 @@ export default function ItineraryParser() {
             </div>
           )}
 
-          {/* Upload step */}
           {step === 'upload' && (
             <div>
               <div style={{ border: '2px dashed var(--border)', borderRadius: 10, padding: '48px 24px', textAlign: 'center', cursor: 'pointer', transition: 'all 0.2s', ...(drag ? { borderColor: 'var(--purple)', background: 'rgba(139,92,246,0.05)' } : {}) }}
@@ -636,7 +565,6 @@ export default function ItineraryParser() {
             </div>
           )}
 
-          {/* Parsing step */}
           {step === 'parsing' && (
             <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: 24 }}>
               <div style={{ marginBottom: 20 }}>
@@ -657,7 +585,6 @@ export default function ItineraryParser() {
             </div>
           )}
 
-          {/* Edit step */}
           {step === 'edit' && (
             <>
               <div style={{ display: 'flex', gap: 2, borderBottom: '1px solid var(--border)', marginBottom: 24 }}>
@@ -682,7 +609,6 @@ export default function ItineraryParser() {
         </div>
       </div>
 
-      {/* Save bar */}
       {step === 'edit' && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 24px', borderTop: '1px solid var(--border)', background: 'var(--surface)', flexShrink: 0 }}>
           <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>
