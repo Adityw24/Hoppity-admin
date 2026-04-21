@@ -6,6 +6,7 @@ import { useAuth } from '../hooks/useAuth'
 import ArrayField from '../components/ArrayField'
 import DayBuilder from '../components/DayBuilder'
 import MediaUpload from '../components/MediaUpload'
+import AIUpdateModal from '../components/AIUpdateModal'
 
 const TABS       = ['Basics', 'Content', 'Media', 'Itinerary', 'Vendor']
 const CATEGORIES = ['Cultural', 'Wildlife', 'Adventure', 'Trekking', 'Heritage', 'Spiritual', 'Culinary']
@@ -76,6 +77,7 @@ export default function ItineraryForm() {
   const [saving,     setSaving]     = useState(false)
   const [toast,      setToast]      = useState(null)
   const [slugManual, setSlugManual] = useState(false)
+  const [showAIModal, setShowAIModal] = useState(false)
 
   useEffect(() => {
     if (!isEdit) return
@@ -379,6 +381,12 @@ export default function ItineraryForm() {
             <h1 style={{ fontSize: 16, fontWeight: 600 }}>
               {isEdit ? `Editing: ${form.title || 'Untitled'}` : 'New Itinerary'}
             </h1>
+            {isEdit && (
+              <button type="button" className="btn" onClick={() => setShowAIModal(true)}
+                style={{ background: 'rgba(139,92,246,0.12)', color: 'var(--purple-light)', border: '1px solid rgba(139,92,246,0.3)', fontWeight: 600, fontSize: 12 }}>
+                ✦ Update with AI
+              </button>
+            )}
             {isEdit && id && (
               <span className="mono badge badge-purple" style={{ fontSize: 11 }}>
                 HOP-{String(id).padStart(4, '0')}
@@ -412,6 +420,16 @@ export default function ItineraryForm() {
             </span>
           </button>
         </div>
+
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          onClick={() => setShowAIModal(true)}
+          title="Open AI updater"
+          style={{ marginRight: 8 }}
+        >
+          AI Update
+        </button>
 
         <button type="submit" className="btn btn-primary" disabled={saving}>
           {saving
@@ -834,6 +852,13 @@ export default function ItineraryForm() {
 
         </div>
       </div>
+
+      {showAIModal && (
+        <AIUpdateModal
+          onClose={() => setShowAIModal(false)}
+          onApply={(updates) => { Object.entries(updates).forEach(([k, v]) => set(k, v)) }}
+        />
+      )}
 
     </form>
   )
