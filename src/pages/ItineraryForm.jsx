@@ -76,6 +76,7 @@ export default function ItineraryForm() {
   const [saving,     setSaving]     = useState(false)
   const [toast,      setToast]      = useState(null)
   const [slugManual, setSlugManual] = useState(false)
+  const [dbId, setDbId] = useState(id || null)
 
   useEffect(() => {
     if (!isEdit) return
@@ -97,6 +98,7 @@ export default function ItineraryForm() {
             search_tags:    data.search_tags    || [],
           })
           setSlugManual(true)
+          setDbId(data.id)
         }
         setLoading(false)
       })
@@ -148,6 +150,33 @@ export default function ItineraryForm() {
     setToast({ type, msg })
     setTimeout(() => setToast(null), 4000)
   }, [])
+
+  const ensureDraftRow = useCallback(async () => {
+    if (dbId) return dbId
+    if (!form.title?.trim()) return null
+
+    try {
+      const slug = slugify(form.title)
+      const { data, error } = await supabase
+        .from('Itineraries')
+        .insert({
+          title: form.title,
+          slug: slug || `draft-${Date.now()}`,
+          is_active: false,
+          images: [],
+        })
+        .select('id')
+        .single()
+
+      if (error) throw error
+      setDbId(data.id)
+      setSlugManual(true)
+      return data.id
+    } catch (e) {
+      console.warn('ensureDraftRow failed:', e)
+      return null
+    }
+  }, [dbId, form.title])
 
   const validateForm = () => {
     const errors = []
@@ -263,8 +292,8 @@ export default function ItineraryForm() {
           const { data, error } = await supabase.from('Itineraries').select('id').eq('slug', slugCandidate).maybeSingle()
           if (error) throw error
           if (!data) return slugCandidate
-          // If editing same record, allow same slug
-          if (isEdit && data && String(data.id) === String(id)) return slugCandidate
+          const currentId = dbId || id
+          if (currentId && data && String(data.id) === String(currentId)) return slugCandidate
           // Otherwise try next suffix
           slugCandidate = `${candidate}-${idx}`
           idx += 1
@@ -295,14 +324,16 @@ export default function ItineraryForm() {
       delete payload.search_vector
       delete payload.updated_at
 
-      let savedId = id
-      if (isEdit) {
-        const { error } = await supabase.from('Itineraries').update(payload).eq('id', id)
+      const currentId = dbId || id
+      let savedId = currentId
+      if (currentId) {
+        const { error } = await supabase.from('Itineraries').update(payload).eq('id', currentId)
         if (error) throw error
       } else {
         const { data, error } = await supabase.from('Itineraries').insert(payload).select('id').single()
         if (error) throw error
         savedId = data.id
+        setDbId(data.id)
       }
 
       try {
@@ -379,9 +410,9 @@ export default function ItineraryForm() {
             <h1 style={{ fontSize: 16, fontWeight: 600 }}>
               {isEdit ? `Editing: ${form.title || 'Untitled'}` : 'New Itinerary'}
             </h1>
-            {isEdit && id && (
+            {dbId && (
               <span className="mono badge badge-purple" style={{ fontSize: 11 }}>
-                HOP-{String(id).padStart(4, '0')}
+                HOP-{String(dbId).padStart(4, '0')}
               </span>
             )}
           </div>
@@ -424,7 +455,14 @@ export default function ItineraryForm() {
       <div style={{ display: 'flex', padding: '0 32px', borderBottom: '1px solid var(--border)', background: 'var(--surface)' }}>
         {TABS.map(t => (
           <button
-            key={t} type="button" onClick={() => setTab(t)}
+            key={t}
+            type="button"
+            onClick={async () => {
+              if (t === 'Media' && !dbId && form.title?.trim()) {
+                await ensureDraftRow()
+              }
+              setTab(t)
+            }}
             style={{
               padding: '12px 20px', background: 'none', border: 'none',
               borderBottom: tab === t ? '2px solid var(--purple)' : '2px solid transparent',
@@ -693,13 +731,23 @@ export default function ItineraryForm() {
           {tab === 'Media' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
 
+              {!dbId && !form.title?.trim() && (
+                <div style={{
+                  padding: '12px 16px', background: 'rgba(245,158,11,0.08)',
+                  border: '1px solid rgba(245,158,11,0.3)', borderRadius: 10,
+                  fontSize: 13, color: '#92400e',
+                }}>
+                  Add a title on the Basics tab first - it's needed to save images immediately.
+                </div>
+              )}
+
               <div>
                 <p className="section-label" style={{ marginBottom: 12 }}>Photos</p>
                 <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16, lineHeight: 1.5 }}>
                   Upload images from your device or enter an image URL directly.
                   The first image will be used as the listing cover photo.
                 </p>
-                <MediaUpload label="Photos" multiple value={form.images} onChange={setImages} accept="image/*" />
+                <MediaUpload label="Photos" multiple value={form.images} onChange={setImages} accept="image/*" bucket="itinerary-media" folder={form.slug || slugify(form.title)} itineraryId={dbId} />
               </div>
 
               <div>
@@ -707,7 +755,7 @@ export default function ItineraryForm() {
                 <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16 }}>
                   Override which image is used as the cover. By default, the first photo is the cover.
                 </p>
-                <MediaUpload label="Cover" multiple={false} value={form.cover_image_url} onChange={setCoverImg} accept="image/*" />
+                <MediaUpload label="Cover" multiple={false} value={form.cover_image_url} onChange={setCoverImg} accept="image/*" bucket="itinerary-media" folder={form.slug || slugify(form.title)} itineraryId={dbId} isCover={true} />
               </div>
 
               <div>
@@ -715,7 +763,7 @@ export default function ItineraryForm() {
                 <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16 }}>
                   Used in the app feed. Upload an MP4 or paste a URL.
                 </p>
-                <MediaUpload label="Video" multiple={false} value={form.video_url} onChange={setVideoUrl} accept="video/*" />
+                <MediaUpload label="Video" multiple={false} value={form.video_url} onChange={setVideoUrl} accept="video/*" bucket="itinerary-media" folder={form.slug || slugify(form.title)} itineraryId={dbId} />
                 <div style={{ marginTop: 12 }}>
                   <Label>Or enter video URL directly</Label>
                   <input
@@ -807,13 +855,13 @@ export default function ItineraryForm() {
                 />
               </Field>
 
-              {isEdit && id && (
+              {dbId && (
                 <div className="card" style={{ padding: 16 }}>
                   <p className="section-label" style={{ marginBottom: 12 }}>Unique Identifiers</p>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                     {[
-                      ['Hoppity ID',  <span className="mono badge badge-purple" style={{ fontSize: 13 }}>HOP-{String(id).padStart(4, '0')}</span>],
-                      ['Database ID', <span className="mono" style={{ fontSize: 12 }}>{id}</span>],
+                      ['Hoppity ID',  <span className="mono badge badge-purple" style={{ fontSize: 13 }}>HOP-{String(dbId).padStart(4, '0')}</span>],
+                      ['Database ID', <span className="mono" style={{ fontSize: 12 }}>{dbId}</span>],
                       ['URL Slug',    <span className="mono" style={{ fontSize: 12, color: 'var(--purple-light)' }}>{form.slug}</span>],
                       ['Public URL',  <a href={`https://www.hoppity.in/itinerary/${form.slug}`} target="_blank" rel="noreferrer"
                           style={{ fontSize: 12, color: 'var(--purple-light)', fontFamily: 'DM Mono', textDecoration: 'none' }}>

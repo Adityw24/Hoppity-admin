@@ -58,7 +58,16 @@ function UploadedMedia({ url, onRemove, label }) {
   )
 }
 
-export default function MediaUpload({ label, multiple = false, value, onChange, accept = 'image/*', bucket = 'itinerary-media' }) {
+export default function MediaUpload({
+  label,
+  multiple = false,
+  value,
+  onChange,
+  accept = 'image/*',
+  bucket = 'itinerary-media',
+  folder = '',
+  itineraryId = null,
+}) {
   const [tab, setTab] = useState('local') // 'local' | 'drive' | 'url'
   const [driveInput, setDriveInput] = useState('')
   const [urlInput, setUrlInput] = useState('')
@@ -86,7 +95,13 @@ export default function MediaUpload({ label, multiple = false, value, onChange, 
     try {
       for (const file of files) {
         const ext = file.name.split('.').pop()
-        const path = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+        // Ensure folder has no leading/trailing slashes
+        const normalizedFolder = folder ? String(folder).replace(/^\/+|\/+$/g, '') : ''
+        const scopedFolder = itineraryId
+          ? [normalizedFolder, String(itineraryId)].filter(Boolean).join('/')
+          : normalizedFolder
+        const folderPath = scopedFolder ? `${scopedFolder}/` : ''
+        const path = `${folderPath}${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
         const { error } = await supabase.storage.from(bucket).upload(path, file, { upsert: false })
         if (error) throw error
         const { data: { publicUrl } } = supabase.storage.from(bucket).getPublicUrl(path)
