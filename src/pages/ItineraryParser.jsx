@@ -360,6 +360,15 @@ export default function ItineraryParser() {
       if (fnData?.error) throw new Error(fnData.error)
 
       const parsed = fnData.result
+      const extractedImages = fnData.extracted_images || []
+      const imagesFound = fnData.images_found || 0
+      const imagesClean = fnData.images_clean || 0
+
+      // Map clean images to cover + gallery (don't overwrite if already set)
+      if (extractedImages.length > 0) {
+        if (!parsed.cover_image_url) parsed.cover_image_url = extractedImages[0]
+        parsed.images = extractedImages.slice(1)
+      }
 
       setTimeout(() => {
         setForm(prev => ({
@@ -373,11 +382,16 @@ export default function ItineraryParser() {
           exclusions: parsed.exclusions || [],
           tips: parsed.tips || [],
           itinerary_days: parsed.itinerary_days || [],
+          cover_image_url: parsed.cover_image_url || prev.cover_image_url || '',
+          images: parsed.images || prev.images || [],
         }))
         setStep('edit')
+        const imgMsg = imagesFound > 0
+          ? ` · ${imagesFound} images found, ${imagesClean} clean (no text overlay) extracted`
+          : ''
         setAlert({
           type: 'success',
-          msg: `Parsed successfully — ${parsed.itinerary_days?.length || 0} days, ${parsed.highlights?.length || 0} highlights, ${(parsed.inclusions?.length || 0) + (parsed.exclusions?.length || 0)} inclusions/exclusions extracted.`
+          msg: `Parsed successfully — ${parsed.itinerary_days?.length || 0} days, ${parsed.highlights?.length || 0} highlights, ${(parsed.inclusions?.length || 0) + (parsed.exclusions?.length || 0)} inclusions/exclusions extracted${imgMsg}.`
         })
       }, 400)
     } catch (err) {
