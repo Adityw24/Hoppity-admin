@@ -424,7 +424,8 @@ export default function ItineraryParser() {
 
     let error
     if (editId) {
-      const res = await supabase.from('Itineraries').update(payload).eq('id', editId)
+      // Cast to Number — editId from URL params is a string, column is bigint
+      const res = await supabase.from('Itineraries').update(payload).eq('id', Number(editId))
       error = res.error
     } else {
       const res = await supabase.from('Itineraries').insert([payload])
