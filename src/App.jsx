@@ -6,6 +6,11 @@ import Dashboard from './pages/Dashboard'
 import ItineraryList from './pages/ItineraryList'
 import ItineraryForm from './pages/ItineraryForm'
 import ItineraryParser from './pages/ItineraryParser'
+import AuditLog from './pages/AuditLog'
+import BlogPosts from './pages/BlogPosts'
+import AffiliateEarnings from './pages/AffiliateEarnings'
+import CreatorSubmissions from './pages/CreatorSubmissions'
+
 
 export default function App() {
   return (
@@ -20,7 +25,11 @@ export default function App() {
             <Route path="itineraries/new" element={<ItineraryForm />} />
             <Route path="itineraries/parse" element={<ItineraryParser />} />
             <Route path="itineraries/:id/edit" element={<ItineraryForm />} />
-          </Route>
+            <Route path="audit" element={<AuditLog />} />
+            <Route path='blog' element={<BlogPosts />} />
+            <Route path='earnings' element={<AffiliateEarnings />} />
+            <Route path='creators' element={<CreatorSubmissions />} />
+                      </Route>
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </BrowserRouter>

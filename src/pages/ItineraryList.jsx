@@ -60,7 +60,14 @@ export default function ItineraryList() {
 
   const toggleActive = async (row) => {
     setToggling(row.id)
-    await supabase.from('Itineraries').update({ is_active: !row.is_active }).eq('id', row.id)
+    const nextActive = !row.is_active
+    const rowId = Number.isFinite(Number(row.id)) ? Number(row.id) : row.id
+    const { error } = await supabase.from('Itineraries').update({ is_active: nextActive }).eq('id', rowId)
+    if (error) {
+      console.error('Failed to toggle itinerary active state:', error)
+      setToggling(null)
+      return
+    }
     try {
       await supabase.from('Admin_logs').insert({
         admin_email: user.email,
@@ -68,10 +75,10 @@ export default function ItineraryList() {
         entity_type: 'itinerary',
         entity_id: String(row.id),
         entity_title: row.title,
-        changes: { is_active: !row.is_active },
+        changes: { is_active: nextActive },
       })
     } catch (e) { /* ignore logging errors */ }
-    setRows(prev => prev.map(r => r.id === row.id ? { ...r, is_active: !r.is_active } : r))
+    setRows(prev => prev.map(r => r.id === row.id ? { ...r, is_active: nextActive } : r))
     setToggling(null)
   }
 

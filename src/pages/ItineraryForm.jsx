@@ -77,6 +77,7 @@ export default function ItineraryForm() {
   const [toast,      setToast]      = useState(null)
   const [slugManual, setSlugManual] = useState(false)
   const [dbId, setDbId] = useState(id || null)
+  const itineraryId = Number.isFinite(Number(dbId || id)) ? Number(dbId || id) : (dbId || id)
 
   useEffect(() => {
     if (!isEdit) return
@@ -177,6 +178,40 @@ export default function ItineraryForm() {
       return null
     }
   }, [dbId, form.title])
+
+  const togglePublish = useCallback(async () => {
+    const newActive = !form.is_active
+    set('is_active', newActive)
+
+    try {
+      let currentId = dbId || id
+
+      // If this itinerary has not been saved yet, create a draft row first so
+      // the publish state can persist across refreshes.
+      if (!currentId) {
+        currentId = await ensureDraftRow()
+      }
+
+      if (!currentId) {
+        throw new Error('Save the itinerary title first before publishing.')
+      }
+
+      const rowId = Number.isFinite(Number(currentId)) ? Number(currentId) : currentId
+
+      const { error } = await supabase
+        .from('Itineraries')
+        .update({ is_active: newActive })
+        .eq('id', rowId)
+
+      if (error) throw error
+
+      if (currentId !== dbId) setDbId(currentId)
+      showToast('success', newActive ? 'Tour is now LIVE' : 'Tour moved to Draft')
+    } catch (error) {
+      set('is_active', !newActive)
+      showToast('error', error.message)
+    }
+  }, [dbId, ensureDraftRow, form.is_active, id, set, showToast])
 
   const validateForm = () => {
     const errors = []
@@ -324,7 +359,7 @@ export default function ItineraryForm() {
       delete payload.search_vector
       delete payload.updated_at
 
-      const currentId = dbId || id
+      const currentId = itineraryId
       let savedId = currentId
       if (currentId) {
         const { error } = await supabase.from('Itineraries').update(payload).eq('id', currentId)
@@ -426,7 +461,7 @@ export default function ItineraryForm() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <button
             type="button"
-            onClick={() => set('is_active', !form.is_active)}
+            onClick={togglePublish}
             style={{
               display: 'flex', alignItems: 'center', gap: 8, padding: '6px 14px',
               background: form.is_active ? 'rgba(16,185,129,0.12)' : 'rgba(245,158,11,0.12)',
@@ -500,7 +535,7 @@ export default function ItineraryForm() {
               </div>
               <button
                 type="button"
-                onClick={() => set('is_active', true)}
+                onClick={togglePublish}
                 style={{
                   padding: '7px 14px', borderRadius: 7, border: 'none',
                   background: '#f59e0b', color: 'white', fontSize: 12, fontWeight: 700,
