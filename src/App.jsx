@@ -10,6 +10,8 @@ import AuditLog from './pages/AuditLog'
 import BlogPosts from './pages/BlogPosts'
 import AffiliateEarnings from './pages/AffiliateEarnings'
 import CreatorSubmissions from './pages/CreatorSubmissions'
+import StayList from './pages/StayList'
+import StayForm from './pages/StayForm'
 
 
 export default function App() {
@@ -29,7 +31,10 @@ export default function App() {
             <Route path='blog' element={<BlogPosts />} />
             <Route path='earnings' element={<AffiliateEarnings />} />
             <Route path='creators' element={<CreatorSubmissions />} />
-                      </Route>
+            <Route path='stays' element={<StayList />} />
+            <Route path='stays/new' element={<StayForm />} />
+            <Route path='stays/:id/edit' element={<StayForm />} />
+          </Route>
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </BrowserRouter>

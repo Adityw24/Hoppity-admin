@@ -1,6 +1,6 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useEffect, useState } from 'react'
-import { LayoutDashboard, Map, PlusCircle, LogOut, Activity, Video, DollarSign, BookOpen, FileSearch } from 'lucide-react'
+import { LayoutDashboard, Map, PlusCircle, LogOut, Activity, Video, DollarSign, BookOpen, FileSearch, Hotel, BedDouble } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 import { supabase } from '../lib/supabase'
 
@@ -26,6 +26,8 @@ export default function Sidebar() {
     { to: '/dashboard',          icon: LayoutDashboard, label: 'Dashboard' },
     { to: '/itineraries',        icon: Map,             label: 'Itineraries' },
     { to: '/itineraries/new',    icon: PlusCircle,      label: 'New Itinerary' },
+    { to: '/stays',              icon: BedDouble,             label: 'Stays' },
+    { to: '/stays/new',          icon: PlusCircle,      label: 'New Stay' },
     { to: '/itineraries/parse',  icon: FileSearch,      label: 'Parse Brochure',  badge: 'AI' },
     { to: '/creators',           icon: Video,           label: 'Creator Videos',  badge: null },
     { to: '/earnings',           icon: DollarSign,      label: 'Affiliate Earnings' },
@@ -66,7 +68,7 @@ export default function Sidebar() {
       {/* Nav */}
       <nav style={{ flex: 1, padding: '0 8px', overflowY: 'auto' }}>
         {links.map(({ to, icon: Icon, label, badge, count }) => (
-          <NavLink key={to} to={to} end={to === '/itineraries'}
+          <NavLink key={to} to={to} end={to === '/itineraries'|| to === '/stays'}
             style={({ isActive }) => ({
               display: 'flex',
               alignItems: 'center',
