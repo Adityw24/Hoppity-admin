@@ -460,11 +460,28 @@ export default function ItineraryForm() {
             <h1 style={{ fontSize: 16, fontWeight: 600 }}>
               {isEdit ? `Editing: ${form.title || 'Untitled'}` : 'New Itinerary'}
             </h1>
-            {dbId && (
-              <span className="mono badge badge-purple" style={{ fontSize: 11 }}>
-                HOP-{String(dbId).padStart(4, '0')}
-              </span>
-            )}
+            {dbId && (() => {
+      const vendorCode = (() => {
+      const words = (form.vendor_name || '')
+        .replace(/[^a-zA-Z\s]/g, '')
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean)
+      if (words.length === 0) return 'XXX'
+      let code = words.map(w => w[0]).join('')
+      let i = 1
+      while (code.length < 3 && words[0][i]) {
+        code += words[0][i]
+        i++
+      }
+      return code.slice(0, 3).padEnd(3, 'X').toUpperCase()
+    })()
+    return (
+      <span className="mono badge badge-purple" style={{ fontSize: 11 }}>
+        HOP-{vendorCode}-{String(dbId).padStart(4, '0')}
+      </span>
+    )
+  })()}
           </div>
           {form.slug && (
             <p className="mono" style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>

@@ -242,15 +242,49 @@ export default function ItineraryList() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map(row => (
+
+          {filtered.map(row => {
+                  // Vendor code from vendor_name
+          const vendorCode = (() => {
+  const words = (row.vendor_name || '')
+    .replace(/[^a-zA-Z\s]/g, '')   // strip non-letters
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+
+  if (words.length === 0) return 'XXX'
+
+  let code
+  if (words.length >= 3) {
+    // 3+ words: initial of each
+    code = words.map(w => w[0]).join('')
+  } else if (words.length === 2) {
+    // 2 words: first letter of word 1, then squeeze word 2 (or use both initials + a consonant)
+    const w1 = words[0], w2 = words[1]
+    code = w1[0] + w2[0]
+    // top up to 3 from word 2's consonants, then word 1's
+    const extra = (w2.slice(1) + w1.slice(1)).replace(/[aeiou]/gi, '')
+    code += extra[0] || ''
+  } else {
+    // single word: first letter + consonants from the rest
+    const w = words[0]
+    const consonants = w.slice(1).replace(/[aeiou]/gi, '')  // drop vowels
+    code = w[0] + consonants
+  }
+
+  return code.slice(0, 3).padEnd(3, 'X').toUpperCase()
+})()
+
+                  return (
                   <tr key={row.id}
                     style={{ borderBottom: '1px solid var(--border)', transition: 'background 0.1s' }}
                     onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
                     onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                   >
+
                     <td style={{ padding: '12px 16px' }}>
                       <span className="mono" style={{ fontSize: 11, color: 'var(--purple-light)', fontWeight: 600 }}>
-                        HOP-{String(row.id).padStart(4,'0')}
+                        HOP-{vendorCode}-{String(row.id).padStart(4,'0')}
                       </span>
                     </td>
                     <td style={{ padding: '12px 16px', maxWidth: 260 }}>
@@ -361,12 +395,12 @@ export default function ItineraryList() {
                           </button>
                         </Link>
                         <Link
-  to={`/itineraries/parse?edit=${row.id}`}
-  className="btn btn-sm"
-  style={{ background: 'rgba(139,92,246,0.12)', color: 'var(--purple-light)', border: '1px solid rgba(139,92,246,0.3)', fontWeight: 600 }}
->
-  ✦ AI
-</Link>
+                          to={`/itineraries/parse?edit=${row.id}`}
+                          className="btn btn-sm"
+                          style={{ background: 'rgba(139,92,246,0.12)', color: 'var(--purple-light)', border: '1px solid rgba(139,92,246,0.3)', fontWeight: 600 }}
+                        >
+                          ✦ AI
+                        </Link>
 
                         {/* Delete */}
                         <button
@@ -384,7 +418,8 @@ export default function ItineraryList() {
                       </div>
                     </td>
                   </tr>
-                ))}
+                  )
+                })}
               </tbody>
             </table>
           </div>
