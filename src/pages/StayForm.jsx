@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { Save, ArrowLeft, CheckCircle, AlertCircle } from 'lucide-react'
+import { Save, ArrowLeft, CheckCircle, AlertCircle, RefreshCw } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import MediaUpload from '../components/MediaUpload'
@@ -28,18 +28,62 @@ const AMENITY_OPTIONS = [
   'Rooftop bar', 'Pet friendly', 'Airport transfer',
 ]
 
+/* A write that matches zero rows is RLS silently refusing — PostgREST
+   returns { data: [], error: null }, indistinguishable from success unless
+   we ask for the affected rows back and count them. */
+const RLS_HINT =
+  'The database accepted the request but changed nothing. This is almost ' +
+  'always Row Level Security — check the UPDATE policy on Properties and ' +
+  'whether owner_id matches your account (see the Details tab).'
+
+// ── Slug helpers ───────────────────────────────────────────────────────────────
+// The slug is the public URL: /stays/<slug>. It is derived from the property
+// name, but it is NOT re-derived once a property is live — changing a published
+// slug breaks every existing link to it. Hence slugLocked below.
+
+function slugify(str) {
+  return String(str || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')   // strip accents
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9\s-]/g, '')      // drop punctuation
+    .replace(/[\s_-]+/g, '-')          // spaces / underscores → hyphen
+    .replace(/^-+|-+$/g, '')           // trim stray hyphens
+    .slice(0, 60)
+    .replace(/-+$/, '')
+}
+
+/**
+ * Find a slug not already taken. `slug` has a UNIQUE constraint, so a
+ * collision would otherwise surface as a confusing 23505 at save time.
+ */
+async function uniqueSlug(base, excludeId) {
+  const root = slugify(base) || 'stay'
+  for (let n = 1; n <= 50; n++) {
+    const candidate = n === 1 ? root : `${root}-${n}`
+    let q = supabase.from('Properties').select('id').eq('slug', candidate).limit(1)
+    if (excludeId) q = q.neq('id', excludeId)
+    const { data, error } = await q
+    if (error) {
+      console.error('Slug check failed:', error)
+      return candidate   // let the DB constraint be the final arbiter
+    }
+    if (!data || data.length === 0) return candidate
+  }
+  return `${root}-${Date.now().toString(36)}`
+}
+
 // ── Time helpers ───────────────────────────────────────────────────────────────
 // Postgres `time without time zone` expects "HH:MM:SS".
 // <input type="time"> gives "HH:MM" (24h) — convert on save, reverse on load.
 
 function toPostgresTime(str) {
   if (!str?.trim()) return null
-  // Already HH:MM or HH:MM:SS from <input type="time">
   if (/^\d{1,2}:\d{2}(:\d{2})?$/.test(str.trim())) {
     const parts = str.trim().split(':')
     return `${parts[0].padStart(2, '0')}:${parts[1]}:${parts[2] ?? '00'}`
   }
-  // Legacy AM/PM format fallback
   const match = str.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i)
   if (!match) return null
   let h = parseInt(match[1], 10)
@@ -49,7 +93,7 @@ function toPostgresTime(str) {
   return `${String(h).padStart(2, '0')}:${match[2]}:00`
 }
 
-// FIX #3: Return "HH:MM" (24h) so it's compatible with <input type="time">
+// Return "HH:MM" (24h) so it's compatible with <input type="time">
 function fromPostgresTime(str) {
   if (!str) return ''
   const [h, m] = str.split(':').map(Number)
@@ -57,12 +101,8 @@ function fromPostgresTime(str) {
 }
 
 // ── Images parse helper ───────────────────────────────────────────────────────
-// Parse images_url back into an array — handles:
-//   • a real Postgres text[] (already an array)
-//   • a JSON-encoded array string  e.g. '["a.jpg","b.jpg"]'
-//   • an unquoted bracket string   e.g. '[a.jpg, b.jpg]'
-//   • a comma-separated string     e.g. 'a.jpg, b.jpg'
-//   • a single URL string
+// Parse images_url back into an array — handles a real text[], a JSON string,
+// an unquoted bracket string, a comma list, or a single URL.
 function parseImagesUrl(val) {
   if (!val) return []
   if (Array.isArray(val)) return val.filter(Boolean)
@@ -74,26 +114,30 @@ function parseImagesUrl(val) {
       if (Array.isArray(p)) return p.filter(Boolean)
     } catch { /* fall through */ }
   }
-  // strip stray surrounding brackets, then split + de-quote
   const inner = t.startsWith('[') && t.endsWith(']') ? t.slice(1, -1) : t
   return inner.split(',').map(s => s.trim().replace(/^["']|["']$/g, '')).filter(Boolean)
 }
 
+// ── Video detection ────────────────────────────────────────────────────────────
+// Identical to SignaturePropertyPage's isVideo so persistence and rendering agree.
+// Decides whether an uploaded media URL is a video, so it's persisted to the
+// videos_url column instead of images_url.
+const VIDEO_RE   = /\.(mp4|webm|ogg|mov|m4v)(\?.*)?$/i
+const isVideoUrl = (u) => typeof u === 'string' && VIDEO_RE.test(u.trim())
+
 // ── Maps link validation ─────────────────────────────────────────────────────
-// Optional field, but if filled it must be a real http(s) link.
 function isValidMapsLink(str) {
   if (!str?.trim()) return true            // empty is allowed
   try {
     const u = new URL(str.trim())
     return u.protocol === 'http:' || u.protocol === 'https:'
   } catch {
-    return false                           // not a parseable URL
+    return false
   }
 }
 
 // ── STAY code generator ────────────────────────────────────────────────────────
 // Format: STAY-{3 letters}-{4-digit sequence}  e.g. STAY-TTL-0001
-// Rule: take consonants first; if < 3, fill from all letters; pad with X.
 
 function tStayInitials(name) {
   const letters   = name.toUpperCase().replace(/[^A-Z]/g, '')
@@ -121,6 +165,7 @@ async function generateStayCode(name) {
 
 const EMPTY = {
   name:                '',
+  slug:                '',
   description:         '',
   property_type:       '',
   property_category:   'signature',
@@ -138,8 +183,8 @@ const EMPTY = {
   pet_policy:          '',
   owner_id:            null,
   is_active:           false,
-  stay_code:            '',
-  // UI only — never sent to DB
+  stay_code:           '',
+  // UI only — never sent to DB. Holds BOTH images and videos; split by type on save.
   images_arr:          [],
 }
 
@@ -179,8 +224,12 @@ export default function StayForm() {
   const [loading, setLoading] = useState(isEdit)
   const [saving,  setSaving]  = useState(false)
   const [toast,   setToast]   = useState(null)
-  // FIX #4: Store UUID as plain string — never coerce to Number
+  // Store UUID as plain string — never coerce to Number
   const [dbId,    setDbId]    = useState(id || null)
+
+  // Once a slug has been saved, stop auto-syncing it to the name.
+  // Renaming a live property must not silently break its public URL.
+  const [slugLocked, setSlugLocked] = useState(false)
 
   // ── Load existing row (edit mode) ────────────────────────────────────────
   useEffect(() => {
@@ -189,24 +238,24 @@ export default function StayForm() {
       .then(({ data, error }) => {
         if (error) console.error('Load error:', error)
         if (data) {
-          // Parse the full image array so edit mode restores ALL images
           const imgs = parseImagesUrl(data.images_url)
+          const vids = parseImagesUrl(data.videos_url)   // videos live in their own column
           setForm({
             ...EMPTY,
             ...data,
             price_per_night: data.price_per_night ? String(data.price_per_night) : '',
             amenities:       Array.isArray(data.amenities) ? data.amenities : [],
-            // FIX #3: fromPostgresTime now returns "HH:MM" for <input type="time">
             checkin_time:    fromPostgresTime(data.checkin_time),
             checkout_time:   fromPostgresTime(data.checkout_time),
-            images_arr:      imgs,
+            images_arr:      [...imgs, ...vids],   // combined list for the uploader
             images_url:      imgs[0] || '',
             cover_image_url: data.cover_image_url || imgs[0] || '',
             stay_code:       data.stay_code || '',
             maps_url:        data.maps_url || '',
+            slug:            data.slug || slugify(data.name),
           })
-          // FIX #4: Always store as string UUID
           setDbId(String(data.id))
+          setSlugLocked(Boolean(data.slug))
         }
         setLoading(false)
       })
@@ -215,6 +264,26 @@ export default function StayForm() {
   // ── Generic field setter ─────────────────────────────────────────────────
   const set = useCallback((field, val) =>
     setForm(f => ({ ...f, [field]: val })), [])
+
+  // ── Name setter — keeps the slug in step until it's locked ───────────────
+  const setName = useCallback((val) => {
+    setForm(f => ({
+      ...f,
+      name: val,
+      slug: slugLocked ? f.slug : slugify(val),
+    }))
+  }, [slugLocked])
+
+  // Manual slug edit — user typed it, so it's theirs from now on
+  const setSlug = useCallback((val) => {
+    setSlugLocked(true)
+    setForm(f => ({ ...f, slug: slugify(val) }))
+  }, [])
+
+  const regenerateSlug = useCallback(() => {
+    setSlugLocked(false)
+    setForm(f => ({ ...f, slug: slugify(f.name) }))
+  }, [])
 
   // ── Amenity toggle ───────────────────────────────────────────────────────
   const toggleAmenity = useCallback((a) =>
@@ -226,15 +295,18 @@ export default function StayForm() {
     })), [])
 
   // ── Image handlers ───────────────────────────────────────────────────────
-  // images_arr holds the FULL list of uploaded URLs (this is what gets saved).
-  // images_url here is kept as the first URL for the inline preview only.
+  // urls may contain both images and videos. Keep the combined list, but only
+  // ever auto-fill the cover from the first *image* (a video cover breaks cards).
   const handleImagesChange = useCallback((urls) =>
-    setForm(f => ({
-      ...f,
-      images_arr:      urls,
-      images_url:      urls[0] ?? '',
-      cover_image_url: f.cover_image_url || urls[0] || '',
-    })), [])
+    setForm(f => {
+      const firstImage = urls.find(u => !isVideoUrl(u)) || ''
+      return {
+        ...f,
+        images_arr:      urls,
+        images_url:      firstImage,
+        cover_image_url: f.cover_image_url || firstImage,
+      }
+    }), [])
 
   const handleCoverChange = useCallback((url) =>
     setForm(f => ({ ...f, cover_image_url: url })), [])
@@ -242,12 +314,10 @@ export default function StayForm() {
   // ── Toast ────────────────────────────────────────────────────────────────
   const showToast = useCallback((type, msg) => {
     setToast({ type, msg })
-    setTimeout(() => setToast(null), 4000)
+    setTimeout(() => setToast(null), 6000)
   }, [])
 
   // ── ensureDraftRow ───────────────────────────────────────────────────────
-  // FIX #1: Added created_at to satisfy NOT NULL constraint
-  // FIX #2: Guard against missing user / FK violation
   const ensureDraftRow = useCallback(async () => {
     if (dbId) return dbId
     if (!form.name?.trim()) return null
@@ -257,10 +327,12 @@ export default function StayForm() {
     }
     try {
       const code = await generateStayCode(form.name.trim())
+      const slug = await uniqueSlug(form.slug || form.name)
       const { data, error } = await supabase
         .from('Properties')
         .insert({
           name:              form.name.trim(),
+          slug,
           property_category: form.property_category || 'signature',
           is_active:         false,
           amenities:         [],
@@ -268,57 +340,72 @@ export default function StayForm() {
           created_at:        new Date().toISOString(),
           stay_code:         code,
         })
-        .select('id, stay_code')
+        .select('id, stay_code, slug')
         .single()
       if (error) throw error
       setDbId(String(data.id))
-      set('stay_code', data.stay_code)
+      setForm(f => ({ ...f, stay_code: data.stay_code, slug: data.slug }))
+      setSlugLocked(true)
       return String(data.id)
     } catch (e) {
       console.error('ensureDraftRow failed:', e)
       showToast('error', `Failed to create draft: ${e.message}`)
       return null
     }
-  }, [dbId, form.name, form.property_category, user, showToast])
+  }, [dbId, form.name, form.slug, form.property_category, user, showToast])
 
   // ── togglePublish ────────────────────────────────────────────────────────
+  // Verifies the write actually landed — without .select(), an RLS refusal
+  // returns { data: [], error: null } and reads as success.
   const togglePublish = useCallback(async () => {
-    // FIX #2: Guard against unauthenticated user
     if (!user?.id) {
       showToast('error', 'You must be logged in to publish.')
       return
     }
     const newActive = !form.is_active
-    set('is_active', newActive)
+    set('is_active', newActive)          // optimistic
     try {
       let currentId = dbId || id
       if (!currentId) currentId = await ensureDraftRow()
       if (!currentId) throw new Error('Save the property name first before publishing.')
 
-      // FIX #4: Use UUID string directly — no Number() coercion
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('Properties')
         .update({ is_active: newActive })
         .eq('id', currentId)
+        .select('id, is_active')
+
       if (error) throw error
+      if (!data || data.length === 0) {
+        console.error('Publish matched 0 rows.', { currentId, userId: user.id })
+        throw new Error(RLS_HINT)
+      }
+
+      const confirmed = data[0].is_active
+      set('is_active', confirmed)        // trust the DB over local state
+      if (confirmed !== newActive) {
+        throw new Error('The database saved a different value than requested.')
+      }
 
       if (currentId !== dbId) setDbId(String(currentId))
-      showToast('success', newActive ? 'Property is now LIVE' : 'Property moved to Draft')
+      showToast('success', confirmed ? 'Property is now LIVE' : 'Property moved to Draft')
     } catch (err) {
-      set('is_active', !newActive)   // revert on failure
+      console.error('togglePublish failed:', err)
+      set('is_active', !newActive)       // revert on failure
       showToast('error', err.message)
     }
   }, [dbId, ensureDraftRow, form.is_active, id, set, showToast, user])
 
   // ── Validation ─────────────────────────────────────────────────────────
   const validateForm = () => {
-    // FIX #2: Require logged-in user before allowing save
     if (!user?.id)
       return { valid:false, error:'You must be logged in to save a property.', tab:'Basics' }
     if (!form.name?.trim())
       return { valid:false, error:'Property name is required', tab:'Basics' }
     if (!form.property_category)
       return { valid:false, error:'Select a category', tab:'Basics' }
+    if (!slugify(form.slug || form.name))
+      return { valid:false, error:'Could not build a URL slug from that name — add some letters or numbers.', tab:'Basics' }
     if (form.price_per_night && isNaN(parseFloat(form.price_per_night)))
       return { valid:false, error:'Price per night must be a number', tab:'Basics' }
     if (form.maps_url?.trim() && !isValidMapsLink(form.maps_url))
@@ -338,30 +425,39 @@ export default function StayForm() {
 
     setSaving(true)
     try {
-      // FIX #4: Use dbId or id as plain string UUID
       const currentId = dbId || id || null
+
+      // Resolve a collision-free slug before writing (slug is UNIQUE).
+      const finalSlug = await uniqueSlug(form.slug || form.name, currentId)
+
+      // Split uploaded media by type: images → images_url, videos → videos_url.
+      const allMedia  = form.images_arr || []
+      const imageUrls = allMedia.filter(u => !isVideoUrl(u))
+      const videoUrls = allMedia.filter(u =>  isVideoUrl(u))
 
       const payload = {
         name:                form.name.trim(),
+        slug:                finalSlug,
         description:         form.description?.trim()         || null,
         property_type:       form.property_type               || null,
         property_category:   form.property_category           || 'signature',
         location:            form.location?.trim()            || null,
         address:             form.address?.trim()             || null,
-        maps_url:            form.maps_url?.trim()             || null,
+        maps_url:            form.maps_url?.trim()            || null,
         price_per_night:     form.price_per_night
-        ? parseFloat(form.price_per_night) : null,
+          ? parseFloat(form.price_per_night) : null,
         amenities:           form.amenities,
-        cover_image_url:     form.cover_image_url             || null,
-        // Persist the FULL image array as JSON so every uploaded image is saved
-        images_url:          form.images_arr?.length ? JSON.stringify(form.images_arr) : null,
+        // Cover falls back to the first IMAGE only — never a video.
+        cover_image_url:     form.cover_image_url || imageUrls[0] || null,
+        // Persist images and videos to their own columns as JSON arrays.
+        images_url:          imageUrls.length ? JSON.stringify(imageUrls) : null,
+        videos_url:          videoUrls.length ? JSON.stringify(videoUrls) : null,
         meals_included:      form.meals_included?.trim()      || null,
         cancellation_policy: form.cancellation_policy?.trim() || null,
         pet_policy:          form.pet_policy?.trim()          || null,
         checkin_time:        toPostgresTime(form.checkin_time),
         checkout_time:       toPostgresTime(form.checkout_time),
         is_active:           form.is_active,
-        // FIX #2: Always use the real user id — never null for a logged-in user
         owner_id:            user.id,
       }
 
@@ -372,25 +468,34 @@ export default function StayForm() {
       let savedId = currentId
 
       if (currentId) {
-        // UPDATE existing row — no created_at needed
-        const { error } = await supabase
+        // UPDATE existing row — verify it actually matched something
+        const { data, error } = await supabase
           .from('Properties')
           .update(payload)
           .eq('id', currentId)
+          .select('id, is_active, slug')
+
         if (error) throw error
+        if (!data || data.length === 0) {
+          console.error('Save matched 0 rows.', { currentId, userId: user.id })
+          throw new Error(RLS_HINT)
+        }
+        setForm(f => ({ ...f, is_active: data[0].is_active, slug: data[0].slug }))
       } else {
         // INSERT new row — generate STAY code and supply created_at
         const code = await generateStayCode(form.name.trim())
         const { data, error } = await supabase
           .from('Properties')
           .insert({ ...payload, created_at: new Date().toISOString(), stay_code: code })
-          .select('id, stay_code')
+          .select('id, stay_code, slug')
           .single()
         if (error) throw error
         savedId = String(data.id)
         setDbId(savedId)
-        set('stay_code', data.stay_code)
+        setForm(f => ({ ...f, stay_code: data.stay_code, slug: data.slug }))
       }
+
+      setSlugLocked(true)
 
       // Admin log — silent fail if table absent
       try {
@@ -413,10 +518,14 @@ export default function StayForm() {
             ? 'Property created and live on the website.'
             : 'Property created as Draft — toggle to publish.',
       )
-      if (!isEdit) setTimeout(() => navigate(`/stays/${savedId}/edit`), 1200)
+      if (!isEdit) setTimeout(() => navigate(`/admin/stays/${savedId}/edit`), 1200)
     } catch (err) {
       console.error('Save error:', err)
-      showToast('error', err.message)
+      // 23505 = unique_violation, almost always the slug
+      const msg = err.code === '23505'
+        ? 'That URL slug is already taken — edit it on the Basics tab.'
+        : err.message
+      showToast('error', msg)
     } finally {
       setSaving(false)
     }
@@ -437,13 +546,16 @@ export default function StayForm() {
       {toast && (
         <div style={{
           position:'fixed', top:20, right:20, zIndex:100,
-          display:'flex', alignItems:'center', gap:10, padding:'12px 18px', borderRadius:10,
+          display:'flex', alignItems:'flex-start', gap:10, padding:'12px 18px', borderRadius:10,
           background: toast.type==='success' ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)',
           border:`1px solid ${toast.type==='success' ? 'rgba(16,185,129,0.35)' : 'rgba(239,68,68,0.35)'}`,
           color: toast.type==='success' ? 'var(--green)' : 'var(--red)',
-          fontSize:13, fontWeight:500, boxShadow:'0 4px 24px rgba(0,0,0,0.3)', maxWidth:360,
+          fontSize:13, fontWeight:500, boxShadow:'0 4px 24px rgba(0,0,0,0.3)', maxWidth:380,
+          lineHeight:1.5,
         }}>
-          {toast.type==='success' ? <CheckCircle size={15}/> : <AlertCircle size={15}/>}
+          <span style={{ flexShrink:0, marginTop:2 }}>
+            {toast.type==='success' ? <CheckCircle size={15}/> : <AlertCircle size={15}/>}
+          </span>
           {toast.msg}
         </div>
       )}
@@ -455,7 +567,7 @@ export default function StayForm() {
         position:'sticky', top:0, zIndex:10,
       }}>
         <button type="button" className="btn btn-ghost btn-sm"
-          onClick={() => navigate('/stays')}>
+          onClick={() => navigate('/admin/stays')}>
           <ArrowLeft size={13}/> Back
         </button>
 
@@ -465,9 +577,9 @@ export default function StayForm() {
               {isEdit ? `Editing: ${form.name || 'Untitled'}` : 'New Stay'}
             </h1>
 
-            {(form.code || dbId) && (
+            {(form.stay_code || dbId) && (
               <span className="mono badge badge-purple" style={{ fontSize:11, letterSpacing:'0.05em' }}>
-                {form.code || '…'}
+                {form.stay_code || '…'}
               </span>
             )}
 
@@ -597,7 +709,7 @@ export default function StayForm() {
                 <Field label="Property name" required>
                   <input type="text" className="field"
                     value={form.name}
-                    onChange={e => set('name', e.currentTarget.value)}
+                    onChange={e => setName(e.currentTarget.value)}
                     placeholder="Tiger Trail Lodge" autoComplete="off"
                   />
                 </Field>
@@ -609,6 +721,36 @@ export default function StayForm() {
                   </select>
                 </Field>
               </div>
+
+              {/* ── URL slug — auto-filled from the name ──────────────── */}
+              <Field
+                label="Page URL"
+                hint={slugLocked
+                  ? 'Locked so the public link keeps working. Editing this breaks any existing link to the property.'
+                  : 'Generated from the property name as you type.'}
+              >
+                <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                  <span style={{
+                    fontSize:12, color:'var(--text-dim)', fontFamily:'DM Mono',
+                    flexShrink:0, whiteSpace:'nowrap',
+                  }}>
+                    hoppity.in/stays/
+                  </span>
+                  <input type="text" className="field"
+                    value={form.slug}
+                    onChange={e => setSlug(e.currentTarget.value)}
+                    placeholder="tiger-trail-lodge"
+                    autoComplete="off"
+                    style={{ flex:1, fontFamily:'DM Mono', fontSize:13 }}
+                  />
+                  <button type="button" className="btn btn-ghost btn-sm"
+                    onClick={regenerateSlug}
+                    title="Rebuild the slug from the property name"
+                    style={{ flexShrink:0 }}>
+                    <RefreshCw size={12}/> Reset
+                  </button>
+                </div>
+              </Field>
 
               <Field label="Location" hint="Display text e.g. Jim Corbett, Uttarakhand">
                 <input type="text" className="field"
@@ -689,37 +831,43 @@ export default function StayForm() {
               )}
 
               <div>
-                <p className="section-label" style={{ marginBottom:12 }}>Photos</p>
+                <p className="section-label" style={{ marginBottom:12 }}>Photos & Videos</p>
                 <p style={{ fontSize:13, color:'var(--text-muted)', marginBottom:16, lineHeight:1.5 }}>
-                  Upload images from your device. All uploaded images are saved to the listing; the first image is used as the cover photo by default.
+                  Upload photos and videos from your device. Images are saved to <code>images_url</code> and
+                  videos to <code>videos_url</code> automatically — the first image is used as the cover photo by default.
                 </p>
                 <MediaUpload
-                  label="Photos" multiple
+                  label="Photos & Videos" multiple
                   value={form.images_arr}
                   onChange={handleImagesChange}
-                  accept="image/*"
+                  accept="image/*,video/*"
                   bucket="propertymedia"
                   folder={`image/${form.name?.trim() || 'untitled'}`}
                   itineraryId={dbId}
                 />
-                {form.images_arr?.length > 0 && (
-                  <div style={{
-                    marginTop:10, padding:'8px 12px', borderRadius:7,
-                    background:'var(--surface-alt)', border:'1px solid var(--border)',
-                  }}>
-                    <p style={{ fontSize:11, color:'var(--text-dim)', marginBottom:4 }}>
-                      {form.images_arr.length} image{form.images_arr.length > 1 ? 's' : ''} saved to <code>images_url</code>:
-                    </p>
-                    <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
-                      {form.images_arr.map((u, i) => (
-                        <a key={i} href={u} target="_blank" rel="noreferrer"
-                          style={{ fontSize:11, color:'var(--purple-light)', wordBreak:'break-all', fontFamily:'DM Mono' }}>
-                          {i + 1}. {u}
-                        </a>
-                      ))}
+                {form.images_arr?.length > 0 && (() => {
+                  const imgs = form.images_arr.filter(u => !isVideoUrl(u))
+                  const vids = form.images_arr.filter(isVideoUrl)
+                  return (
+                    <div style={{
+                      marginTop:10, padding:'8px 12px', borderRadius:7,
+                      background:'var(--surface-alt)', border:'1px solid var(--border)',
+                    }}>
+                      <p style={{ fontSize:11, color:'var(--text-dim)', marginBottom:4 }}>
+                        {imgs.length} image{imgs.length !== 1 ? 's' : ''} → <code>images_url</code>
+                        {vids.length > 0 && <> · {vids.length} video{vids.length !== 1 ? 's' : ''} → <code>videos_url</code></>}
+                      </p>
+                      <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
+                        {form.images_arr.map((u, i) => (
+                          <a key={i} href={u} target="_blank" rel="noreferrer"
+                            style={{ fontSize:11, color:'var(--purple-light)', wordBreak:'break-all', fontFamily:'DM Mono' }}>
+                            {i + 1}. {isVideoUrl(u) ? '🎬 ' : ''}{u}
+                          </a>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )
+                })()}
               </div>
 
               <div>
@@ -755,8 +903,6 @@ export default function StayForm() {
 
           {/* ════════════════════════════════════════════════════════════════
               POLICIES TAB
-              FIX #3: type="time" inputs now work correctly because
-              fromPostgresTime returns "HH:MM" (24h) format
           ════════════════════════════════════════════════════════════════ */}
           {tab === 'Policies' && (
             <div style={{ display:'flex', flexDirection:'column', gap:20 }}>
@@ -868,11 +1014,15 @@ export default function StayForm() {
                   <p className="section-label" style={{ marginBottom:12 }}>Identifiers</p>
                   <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
                     {[
-                      ['Hoppity ID',        <span className="mono badge badge-purple" style={{ fontSize:13, letterSpacing:'0.05em' }}>{form.code || '—'}</span>],
+                      ['Hoppity ID',       <span className="mono badge badge-purple" style={{ fontSize:13, letterSpacing:'0.05em' }}>{form.stay_code || '—'}</span>],
+                      ['Page URL',         <span className="mono" style={{ fontSize:11, color:'var(--text-dim)', wordBreak:'break-all' }}>/stays/{form.slug || '—'}</span>],
                       ['Database ID',      <span className="mono" style={{ fontSize:12 }}>{dbId}</span>],
+                      ['Owner ID',         <span className="mono" style={{ fontSize:11, color:'var(--text-dim)', wordBreak:'break-all' }}>{form.owner_id || '—'}</span>],
+                      ['Your user ID',     <span className="mono" style={{ fontSize:11, color:'var(--text-dim)', wordBreak:'break-all' }}>{user?.id || '—'}</span>],
                       ['Category',         <span className="mono" style={{ fontSize:12 }}>{form.property_category}</span>],
                       ['Status',           <span className="mono" style={{ fontSize:12 }}>{form.is_active ? 'LIVE' : 'Draft'}</span>],
-                      ['Image count',      <span className="mono" style={{ fontSize:12 }}>{form.images_arr?.length || 0}</span>],
+                      ['Image count',      <span className="mono" style={{ fontSize:12 }}>{form.images_arr?.filter(u => !isVideoUrl(u)).length || 0}</span>],
+                      ['Video count',      <span className="mono" style={{ fontSize:12 }}>{form.images_arr?.filter(isVideoUrl).length || 0}</span>],
                       ['cover_image_url',  <span className="mono" style={{ fontSize:11, color:'var(--text-dim)', wordBreak:'break-all' }}>{form.cover_image_url || '—'}</span>],
                       ['maps_url',         <span className="mono" style={{ fontSize:11, color:'var(--text-dim)', wordBreak:'break-all' }}>{form.maps_url || '—'}</span>],
                     ].map(([lbl, val]) => (

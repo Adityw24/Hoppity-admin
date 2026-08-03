@@ -241,8 +241,8 @@ export default function ItineraryForm() {
       errors.push('Blurb should be 1-2 sentences')
       return { valid: false, errors, tab: tabFor('Content') }
     }
-    if (blurb.length > 220) {
-      errors.push('Blurb should be 220 characters or fewer')
+    if (blurb.length > 290) {
+      errors.push('Blurb should be 290 characters or fewer')
       return { valid: false, errors, tab: tabFor('Content') }
     }
 
