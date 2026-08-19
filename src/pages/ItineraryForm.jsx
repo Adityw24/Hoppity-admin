@@ -1,13 +1,13 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { Save, ArrowLeft, CheckCircle, AlertCircle } from 'lucide-react'
+import { Save, ArrowLeft, CheckCircle, AlertCircle, Trash2, Plus } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import ArrayField from '../components/ArrayField'
 import DayBuilder from '../components/DayBuilder'
 import MediaUpload from '../components/MediaUpload'
 
-const TABS       = ['Basics', 'Content', 'Media', 'Itinerary', 'Vendor']
+const TABS       = ['Basics', 'Content', 'Media', 'Itinerary', 'Vendor', 'Batches']
 const CATEGORIES = ['Cultural', 'Wildlife', 'Adventure', 'Trekking', 'Heritage', 'Spiritual', 'Culinary']
 const DIFFICULTIES = ['Easy', 'Moderate', 'Challenging']
 const STATES = [
@@ -32,7 +32,7 @@ const EMPTY = {
   highlights: [], inclusions: [], exclusions: [], tips: [], city_stops: [],
   cover_image_url: '', images: [], video_url: '', itinerary_days: [],
   vendor_name: '', vendor_contact: '', vendor_notes: '', guide_id: '',
-  search_tags: [],
+  search_tags: [], batches: []
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -97,6 +97,7 @@ export default function ItineraryForm() {
             city_stops:     data.city_stops     || [],
             itinerary_days: data.itinerary_days || [],
             search_tags:    data.search_tags    || [],
+            batches:        data.batches        || [],
           })
           setSlugManual(true)
           setDbId(data.id)
@@ -133,6 +134,7 @@ export default function ItineraryForm() {
   const setTips       = useCallback(v => setForm(f => ({ ...f, tips:            v })), [])
   const setCityStops  = useCallback(v => setForm(f => ({ ...f, city_stops:      v })), [])
   const setSearchTags = useCallback(v => setForm(f => ({ ...f, search_tags:     v })), [])
+  const setBatches    = useCallback(v => setForm(f => ({ ...f, batches:         v })), [])
   const setItinerary  = useCallback(v => setForm(f => ({ ...f, itinerary_days:  v })), [])
   const setCoverImg   = useCallback(v => setForm(f => ({ ...f, cover_image_url: v })), [])
   const setVideoUrl   = useCallback(v => setForm(f => ({ ...f, video_url:       v })), [])
@@ -313,6 +315,35 @@ export default function ItineraryForm() {
     if (form.vendor_contact && String(form.vendor_contact).trim() && !/^\d{1,10}$/.test(String(form.vendor_contact).trim())) {
       errors.push('Vendor Contact must contain only digits and be at most 10 digits')
       return { valid: false, errors, tab: tabFor('Vendor') }
+    }
+
+    // Batches validation
+    if (Array.isArray(form.batches)) {
+      for (let i = 0; i < form.batches.length; i++) {
+        const b = form.batches[i]
+        if (!b || !b.start_date) {
+          errors.push(`Batch ${i + 1}: start date is required`)
+          return { valid: false, errors, tab: tabFor('Batches') }
+        }
+        if (b.end_date && b.end_date < b.start_date) {
+          errors.push(`Batch ${i + 1}: end date can't be before start date`)
+          return { valid: false, errors, tab: tabFor('Batches') }
+        }
+        const total  = b.seats_total  == null || b.seats_total  === '' ? null : Number(b.seats_total)
+        const booked = b.seats_booked == null || b.seats_booked === '' ? 0    : Number(b.seats_booked)
+        if (total != null && (isNaN(total) || total < 0)) {
+          errors.push(`Batch ${i + 1}: seats total must be a positive number`)
+          return { valid: false, errors, tab: tabFor('Batches') }
+        }
+        if (isNaN(booked) || booked < 0) {
+          errors.push(`Batch ${i + 1}: seats booked must be a positive number`)
+          return { valid: false, errors, tab: tabFor('Batches') }
+        }
+        if (total != null && booked > total) {
+          errors.push(`Batch ${i + 1}: seats booked can't exceed seats total`)
+          return { valid: false, errors, tab: tabFor('Batches') }
+        }
+      }
     }
 
     return { valid: true, errors: [] }
@@ -943,6 +974,145 @@ export default function ItineraryForm() {
                   </div>
                 </div>
               )}
+
+            </div>
+          )}
+
+          {/* ── BATCHES ────────────────────────────────────────── */}
+          {tab === 'Batches' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+              <div>
+                <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 4 }}>
+                  Departure batches for this trip. Each row is one operating batch travellers can book.
+                  Saved into <code className="mono">Itineraries.batches</code>.
+                </p>
+                <p style={{ fontSize: 12, color: 'var(--text-dim)' }}>
+                  Past batches auto-hide on the site. Only <strong style={{ color: 'var(--green)' }}>open</strong> batches
+                  with seats left are bookable at checkout.
+                </p>
+              </div>
+
+              {(form.batches || []).length === 0 && (
+                <div style={{
+                  padding: '14px 16px', background: 'rgba(245,158,11,0.08)',
+                  border: '1px solid rgba(245,158,11,0.25)', borderRadius: 10,
+                  fontSize: 13, color: '#92400e',
+                }}>
+                  No batches yet. Add one below — until a trip has an open batch, travellers can't pick a date at checkout.
+                </div>
+              )}
+
+              {(form.batches || []).map((b, i) => {
+                const patch = (changes) => {
+                  const next = form.batches.map((row, idx) => idx === i ? { ...row, ...changes } : row)
+                  setBatches(next)
+                }
+                const removeBatch = () => setBatches(form.batches.filter((_, idx) => idx !== i))
+
+                const total  = b.seats_total  === '' || b.seats_total  == null ? null : Number(b.seats_total)
+                const booked = b.seats_booked === '' || b.seats_booked == null ? 0    : Number(b.seats_booked)
+                const left   = total == null ? null : total - booked
+                const full   = left != null && left <= 0
+
+                return (
+                  <div key={i} className="card" style={{ padding: 16 }}>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                      <Field label="Start date" required>
+                        <input
+                          type="date"
+                          className="field"
+                          value={b.start_date || ''}
+                          onChange={e => patch({ start_date: e.currentTarget.value })}
+                        />
+                      </Field>
+                      <Field label="End date">
+                        <input
+                          type="date"
+                          className="field"
+                          value={b.end_date || ''}
+                          min={b.start_date || undefined}
+                          onChange={e => patch({ end_date: e.currentTarget.value })}
+                        />
+                      </Field>
+                      <Field label="Seats total" hint="Leave blank for unlimited">
+                        <input
+                          type="number"
+                          className="field"
+                          min="0"
+                          value={b.seats_total ?? ''}
+                          onChange={e => patch({ seats_total: e.currentTarget.value })}
+                          placeholder="12"
+                        />
+                      </Field>
+                      <Field label="Seats booked">
+                        <input
+                          type="number"
+                          className="field"
+                          min="0"
+                          value={b.seats_booked ?? ''}
+                          onChange={e => patch({ seats_booked: e.currentTarget.value })}
+                          placeholder="0"
+                        />
+                      </Field>
+                    </div>
+
+                    <div style={{
+                      display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between',
+                      gap: 12, marginTop: 14, flexWrap: 'wrap',
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 14, flexWrap: 'wrap' }}>
+                        <Field label="Status">
+                          <select
+                            className="field"
+                            style={{ width: 140 }}
+                            value={b.status || 'open'}
+                            onChange={e => patch({ status: e.currentTarget.value })}
+                          >
+                            <option value="open">open</option>
+                            <option value="full">full</option>
+                            <option value="closed">closed</option>
+                          </select>
+                        </Field>
+                        {left != null && (
+                          <span style={{
+                            fontSize: 12, fontWeight: 600, padding: '5px 12px', borderRadius: 7, marginBottom: 2,
+                            color: full ? 'var(--red)' : left <= 3 ? '#92400e' : 'var(--green)',
+                            background: full ? 'rgba(239,68,68,0.12)' : left <= 3 ? 'rgba(245,158,11,0.12)' : 'rgba(16,185,129,0.12)',
+                          }}>
+                            {full ? 'Fully booked' : `${left} seat${left > 1 ? 's' : ''} left`}
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={removeBatch}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 6, padding: '7px 12px',
+                          background: 'none', border: '1px solid rgba(239,68,68,0.4)', borderRadius: 8,
+                          color: 'var(--red)', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                          fontFamily: 'DM Sans, sans-serif', marginBottom: 2,
+                        }}
+                      >
+                        <Trash2 size={13} /> Remove
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+
+              <button
+                type="button"
+                onClick={() => setBatches([
+                  ...(form.batches || []),
+                  { start_date: '', end_date: '', seats_total: '', seats_booked: 0, status: 'open' },
+                ])}
+                className="btn btn-ghost"
+                style={{ alignSelf: 'flex-start', gap: 6 }}
+              >
+                <Plus size={14} /> Add batch
+              </button>
 
             </div>
           )}

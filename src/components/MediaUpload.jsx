@@ -79,13 +79,13 @@ export default function MediaUpload({
   const singleValue = !multiple ? value : null
 
   const addUrl = (url) => {
-    if (!url.trim()) return
-    if (multiple) {
-      onChange([...values, url.trim()])
-    } else {
-      onChange(url.trim())
-    }
+  if (!url.trim()) return
+  if (multiple) {
+    onChange([...values, url.trim()])   // Photos → array
+  } else {
+    onChange(url.trim())                // Video/Cover → single string
   }
+}
 
 const [uploadProgress, setUploadProgress] = useState(0)  // files uploaded so far
 const [totalFiles, setTotalFiles] = useState(0)           // total files selected
